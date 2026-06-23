@@ -1,0 +1,6 @@
+dataclasses
+func_timeout
+cachetools
+openai
+biopython
+graphviz
