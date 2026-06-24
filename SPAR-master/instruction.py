@@ -47,6 +47,14 @@ template_extract_keywords_source_aware = """Extract optimal search keywords from
 - OpenAlex: [Start] neural networks, deep learning, artificial intelligence, pattern recognition[End]
 - PubMed: [Start] CRISPR-Cas9, gene editing, genetic therapy, chromosomal modification[End]
 
+### Important:
+- Output **ONLY** the keyword list enclosed in [Start] and [End] tags.
+- Do NOT include any explanations, reasoning, or additional text.
+- Your entire response should be exactly in this format: [Start] keyword1, keyword2, ... [End]
+1. Do NOT include any reasoning, explanations, or thinking process in your response.
+2. Output ONLY the keyword list enclosed in [Start] and [End] tags.
+3. Your entire response should be exactly in this format: [Start] keyword1, keyword2, ... [End]
+
 Now, extract optimized search keywords for {source} from this question:
 {user_query}
 """

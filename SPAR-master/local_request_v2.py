@@ -4,6 +4,8 @@
 # [Author]       : shixiaofeng
 # [Descriptions] :
 # ==================================================================
+import os
+import httpx
 import requests
 import json
 import time
@@ -51,19 +53,38 @@ MODEL_CONFIGS = {
         url="http://0.0.0.0:9087/v1/chat/completions",
         max_len=131072,
     ),
-
-    "Qwen3-8B": ModelConfig(
-        url="http://0.0.0.0:9096/v1",
+    "Qwen2.5-7B": ModelConfig(
+        url="https://api.siliconflow.cn/v1/chat/completions",
         max_len=131072,
-        model_name="Qwen/Qwen3-8B",
+        model_name="Qwen/Qwen2.5-7B-Instruct",
         think_bool=False,
         temperature=0.7,
         top_p=0.8,
         top_k=20,
         min_p=0,
+        timeout=120,
         openai_client=OpenAI(
-            api_key="EMPTY",
-            base_url="http://0.0.0.0:9096/v1",
+            api_key=os.getenv("SILICONFLOW_API_KEY", "your_api_key_here"),
+            base_url="https://api.siliconflow.cn/v1",
+            timeout=120.0,
+            max_retries=2,
+        ),
+    ),
+    "Qwen3-8B": ModelConfig(
+        url="https://api.siliconflow.cn/v1/chat/completions",
+        max_len=131072,  # 8B 上下文长度
+        model_name="Qwen/Qwen3-8B",
+        think_bool=False,  # 非思考模式，使用 content 字段
+        temperature=0.7,
+        top_p=0.8,
+        top_k=20,
+        min_p=0,
+        timeout=120,
+        openai_client=OpenAI(
+            api_key=os.getenv("SILICONFLOW_API_KEY", "your_api_key_here"),
+            base_url="https://api.siliconflow.cn/v1",
+            timeout=120.0,
+            max_retries=2,
         ),
     ),
     "Qwen3-14B": ModelConfig(
@@ -108,6 +129,24 @@ MODEL_CONFIGS = {
             base_url="http://0.0.0.0:9094/v1",
         ),
     ),
+    "deepseek-ai/DeepSeek-V3.2": ModelConfig(
+        url="https://api.siliconflow.cn/v1/chat/completions",  # 硅基流动的 API 地址
+        max_len=131072,
+        model_name="deepseek-ai/DeepSeek-V3.2",
+        think_bool=False,
+        temperature=0.7,
+        top_p=0.8,
+        top_k=20,
+        min_p=0,
+        openai_client=OpenAI(
+            api_key=os.getenv("SILICONFLOW_API_KEY", "your_api_key_here"),
+            base_url="https://api.siliconflow.cn/v1",
+            timeout=300.0,
+            max_retries=3,
+            # 如果需要代理，取消注释并修改端口
+            # http_client=httpx.Client(proxies="http://127.0.0.1:7890")
+        ),
+    ),
 }
 
 
@@ -127,16 +166,17 @@ class LLMClient:
         session.mount("http://", HTTPAdapter(max_retries=retries))
         return session
 
-    def _cache_key(self, url: str, data: Dict[str, Any], timeout: int) -> tuple:
+    def _cache_key(self, url: str, data: Dict[str, Any], timeout: int = 200) -> tuple:
         """Custom cache key function that makes data hashable"""
         data_str = json.dumps(data, sort_keys=True)  # Serialize dict to string
-        return hashkey(url, data_str, timeout)  # Use cachetools' hashkey
+        return hashkey(url, data_str)  # Use cachetools' hashkey
 
-    @cachedmethod(operator.attrgetter("cache"), key=_cache_key)
-    def _make_request(
+    # @cachedmethod(operator.attrgetter("cache"), key=_cache_key)
+    """
+        def _make_request(
         self, url: str, data: Dict[str, Any], timeout: int
     ) -> Optional[str]:
-        """Make HTTP request with caching"""
+        # Make HTTP request with caching
         try:
             if "Qwen3" in data["model"]:  # 判断是否使用 Qwen3-32B 模型
                 return self._make_qwen3_request(data)
@@ -144,6 +184,15 @@ class LLMClient:
                 response = self.session.post(url, json=data, timeout=timeout)
                 response.raise_for_status()
                 return response.json()["choices"][0]["message"]["content"]
+        except Exception as e:
+            logger.error(f"Request failed: {str(e)}")
+            return None
+    """
+
+    def _make_request(self, url: str, data: Dict[str, Any], timeout: int) -> Optional[str]:
+        try:
+            # 所有模型都走 OpenAI 客户端
+            return self._make_qwen3_request(data)
         except Exception as e:
             logger.error(f"Request failed: {str(e)}")
             return None

@@ -784,44 +784,39 @@ def search_paper_via_query_from_semantic(query, max_paper_num=15, end_date=None)
 
 def google_search_arxiv_id(query, try_num=4, num=10, end_date=""):
     """从google搜索arxiv id, 要是用api，免费额度2500"""
-    # refer from: https://serper.dev/playground
     url = "https://google.serper.dev/search"
     search_query = f"{query} site:arxiv.org"
-    # logger.info(f"end_date: {end_date}")
+
     if end_date != "":
         try:
             end_date = datetime.strptime(end_date, "%Y%m%d").strftime("%Y-%m-%d")
             search_query = f"{query} before:{end_date} site:arxiv.org"
         except:
-            search_query = f"{query} site:arxiv.org"
-
-    payload = json.dumps(
-        {
-            "q": search_query,
-            "num": num,
-            # "autocorrect": True,
-            "page": 1,
-            # "type":"search"
-        }
-    )
+            search_query = query
 
     GOOGLE_SERPER_KEY = os.getenv("GOOGLE_SERPER_KEY", "xxx")
-    logger.info(f"use GOOGLE_SERPER_KEY: {GOOGLE_SERPER_KEY}")
-    headers = {"X-API-KEY": GOOGLE_SERPER_KEY, "Content-Type": "application/json"}
-    assert headers["X-API-KEY"] != "your google keys", "add your google search key!!!"
+    logger.info(f"use GOOGLE_SERPER_KEY: {GOOGLE_SERPER_KEY[:10]}...")
+    headers = {"X-API-KEY": GOOGLE_SERPER_KEY}
+    params = {"q": search_query, "num": num}
+
+    assert headers["X-API-KEY"] != "xxx", "add your google search key!!!"
 
     for _ in range(try_num):
         try:
-            response = requests.request(
-                "POST", url, headers=headers, data=payload, timeout=10, proxies=PROXIES
+            response = requests.get(
+                url,
+                headers=headers,
+                params=params,
+                timeout=10,
+                proxies=PROXIES
             )
+
             if response.status_code == 200:
-                results = json.loads(response.text)
-                logger.info(f"results: {results}")
+                results = response.json()
                 arxiv_id_list = []
-                for paper in results["organic"]:
-                    link = paper["link"]
-                    match = re.search("arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d+)", link)
+                for paper in results.get("organic", []):
+                    link = paper.get("link", "")
+                    match = re.search(r"arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d+)", link)
                     if match:
                         arxiv_id = match.group(1)
                         arxiv_id_list.append(arxiv_id)
@@ -829,11 +824,9 @@ def google_search_arxiv_id(query, try_num=4, num=10, end_date=""):
                 logger.info(f"google_search_arxiv_id success: {len(res)}")
                 return res
             else:
-                logger.error(f"google_search_arxiv_id response: {response}")
-        except:
-            logger.error(
-                f"google search failed, query: {query}; Error: {traceback.format_exc()}"
-            )
+                logger.error(f"google_search_arxiv_id response: {response.status_code}")
+        except Exception as e:
+            logger.error(f"google search failed, query: {query}; Error: {traceback.format_exc()}")
             continue
     return []
 
