@@ -87,32 +87,21 @@ MODEL_CONFIGS = {
             max_retries=2,
         ),
     ),
-    "Qwen3-14B": ModelConfig(
-        url="http://0.0.0.0:9095/v1",
-        max_len=131072,
-        model_name="Qwen/Qwen3-14B",
-        think_bool=False,
+    "Qwen3-30B-Instruct": ModelConfig(
+        url="https://api.siliconflow.cn/v1/chat/completions",
+        max_len=131072,  # 256K 上下文，硅基流动支持
+        model_name="Qwen/Qwen3-30B-A3B-Instruct-2507",
+        think_bool=False,  # Instruct 模型，无需思考模式
         temperature=0.7,
         top_p=0.8,
         top_k=20,
         min_p=0,
+        timeout=180,  # 稍微增加超时，30B 模型响应稍慢
         openai_client=OpenAI(
-            api_key="EMPTY",
-            base_url="http://0.0.0.0:9095/v1",
-        ),
-    ),
-    "Qwen3-32B": ModelConfig(
-        url="http://0.0.0.0:9094/v1",
-        max_len=131072,
-        model_name="Qwen/Qwen3-32B",
-        think_bool=False,
-        temperature=0.7,
-        top_p=0.8,
-        top_k=20,
-        min_p=0,
-        openai_client=OpenAI(
-            api_key="EMPTY",
-            base_url="http://0.0.0.0:9094/v1",
+            api_key=os.getenv("SILICONFLOW_API_KEY", "your_api_key_here"),
+            base_url="https://api.siliconflow.cn/v1",
+            timeout=180.0,
+            max_retries=2,
         ),
     ),
     "Qwen3-32B-think": ModelConfig(
@@ -216,7 +205,7 @@ class LLMClient:
                     "min_p": data.get("min_p", 0),  # Added to extra_body
                 },  # Disable thinking mode
             )
-            msg = chat_response.choices[0].message.reasoning_content
+            msg = chat_response.choices[0].message.content
             if msg:
                 if "</think>" in msg:
                     msg = msg.split("</think>")[-1]

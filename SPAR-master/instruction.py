@@ -39,26 +39,21 @@ template_extract_keywords_source_aware = """Extract optimal search keywords from
 - Consider clinical and biomedical contexts
 - Include chemical/drug names or biological processes where relevant
 
-### Format your response as follows:
-[Start] keyword1, keyword2, keyword3, ...[End]
-
 ### Examples by Source:
 - Semantic Scholar: [Start] transformer architecture, attention mechanism, language model fine-tuning[End]
 - OpenAlex: [Start] neural networks, deep learning, artificial intelligence, pattern recognition[End]
 - PubMed: [Start] CRISPR-Cas9, gene editing, genetic therapy, chromosomal modification[End]
 
-### Important:
-- Output **ONLY** the keyword list enclosed in [Start] and [End] tags.
-- Do NOT include any explanations, reasoning, or additional text.
-- Your entire response should be exactly in this format: [Start] keyword1, keyword2, ... [End]
-1. Do NOT include any reasoning, explanations, or thinking process in your response.
-2. Output ONLY the keyword list enclosed in [Start] and [End] tags.
-3. Your entire response should be exactly in this format: [Start] keyword1, keyword2, ... [End]
+### Output Format (MUST FOLLOW):
+[Start] keyword1, keyword2, keyword3, ...[End]
+
+### Rules:
+- Output ONLY the keyword list enclosed in [Start] and [End] tags.
+- Do NOT include any explanations, reasoning, or thinking process.
+- Do NOT add any text before or after the tags.
 
 Now, extract optimized search keywords for {source} from this question:
-{user_query}
-"""
-
+{user_query}"""
 
 template_query_domain_complex = """Determine if the academic domain below is a complex, specialized field that requires domain-specific terminology:
 

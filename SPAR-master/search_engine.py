@@ -70,7 +70,7 @@ class MultiSearchAgent:
         self.current_date = "2025-03-24"  # 当前日期，参考你的需求
 
     def extract_keywords(self, query: str, source: str = "semantic") -> List[str]:
-        """Extract keywords from query optimized for a specific source."""
+        """Extract keywords from a query optimized for a specific source."""
         query = query.lower()
         model_inp = template_extract_keywords_source_aware.format(
             user_query=query, source=source
@@ -757,7 +757,7 @@ class AcademicTreeSearchEngine:
             result["domain"] = "undefined"
             result["suitable_sources"] = ["arxiv", "openalex"]
 
-        # Step 2: Determine if query needs expansion
+        # Step 2: Determine if a query needs expansion
         try:
             expansion_analysis = self._evaluate_expansion_need(query, result["domain"])
             if expansion_analysis:

@@ -23,7 +23,7 @@ ENDPOINT = os.getenv(
     "SILICONFLOW_BASE_URL",
     "https://api.siliconflow.cn/v1/chat/completions",
 )
-DEPLOYMENT_NAME = "Qwen3-8B"
+DEPLOYMENT_NAME = "Qwen3-30B-Instruct"
 
 # =============================================================================
 # PIPELINE CONFIGURATION
@@ -48,7 +48,7 @@ LENGTH_GEN_QUERY_FROM_CITATION = 12288
 TRY_COUNT = 4
 LLM_TRY_COUNT = 4
 LLM_PARALLEL_NUM = 4
-LLM_MODEL_NAME = "Qwen3-8B"  # "Qwen3-8B"
+LLM_MODEL_NAME = "Qwen3-30B-Instruct"  # "Qwen3-8B"
 
 
 API_TRY_COUNT = 4
@@ -107,8 +107,8 @@ PROXIES: Dict[str, str] = {
 }
 """
 PROXIES: Dict[str, str] = {
-    "http": os.getenv("HTTP_PROXY", "http://127.0.0.1:7890"),  # 改为你的代理端口
-    "https": os.getenv("HTTPS_PROXY", "http://127.0.0.1:7890")  # Clash 默认 7890
+    # "http": os.getenv("HTTP_PROXY", "http://127.0.0.1:7890"),  # 改为你的代理端口
+    # "https": os.getenv("HTTPS_PROXY", "http://127.0.0.1:7890")  # Clash 默认 7890
 }
 
 # ArXiv client configuration
