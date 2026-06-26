@@ -172,7 +172,8 @@ class MultiSearchAgent:
         self, keyword: str, raw_query: str, end_date: str = "", max_papers: int = 15
     ) -> SearchResult:
         """Execute Semantic Scholar search."""
-        logger.info(f"Searching Semantic Scholar for '{query}'")
+        #logger.info(f"Searching Semantic Scholar for '{query}'")
+        logger.info(f"Searching Semantic Scholar for '{keyword}'")  #wsl
         try:
             papers = search_paper_via_query_from_semantic(
                 query=keyword, max_paper_num=max_papers
@@ -561,9 +562,9 @@ def _generate_query_from_reference(
             return output
         except:
             logger.error(
-                f"Failed to parse response: {response}, will retry {SLEPP_TIME_LLM} seconds...; Error: {traceback.format_exc()}"
+                f"Failed to parse response: {response}, will retry {SLEEP_TIME_LLM} seconds...; Error: {traceback.format_exc()}"
             )
-            time.sleep(SLEPP_TIME_LLM)
+            time.sleep(SLEEP_TIME_LLM) #wsl-小bug
     return []
 
 
@@ -687,7 +688,7 @@ class AcademicTreeSearchEngine:
 
     def expand_query_native(self,query:str):
         judge_info = {"expanded_queries_info":{}}
-        for _ in range(WEB_TRYNUM):
+        for _ in range(WEB_RETRY_NUM):  #wsl-原WEB_TRYNUM
             try:
                 # model_inp = template_query_fusion.format(user_query=query)
                 model_inp = template_query_fusion_pasa.format(user_query=query)
@@ -826,7 +827,7 @@ class AcademicTreeSearchEngine:
                     logger.warning(
                         f"LLM analysis failed (attempt {attempt+1}): {str(e)}"
                     )
-                    time.sleep(SLEPP_TIME_LLM)
+                    time.sleep(SLEEP_TIME_LLM) #wsl-小bug
 
             logger.error("All attempts to analyze query intent failed")
             return None
@@ -863,7 +864,7 @@ class AcademicTreeSearchEngine:
                     logger.warning(
                         f"LLM expansion evaluation failed (attempt {attempt+1}): {str(e)}"
                     )
-                    time.sleep(SLEPP_TIME_LLM)
+                    time.sleep(SLEEP_TIME_LLM)  #wsl
 
             logger.error("All attempts to evaluate expansion need failed")
             return None
@@ -895,7 +896,7 @@ class AcademicTreeSearchEngine:
             previous_year = current_year - 1
 
             # Determine the appropriate template based on query analysis
-            if FUSION_TEMP == "AUTOMATIC" and  self._is_survey_focused(intent):
+            if FUSION_TEMPLATE == "AUTOMATIC" and  self._is_survey_focused(intent):  #wsl应该是写错了
                 # For survey-focused queries, prioritize finding comprehensive reviews
                 logger.info(f"Using survey-focused expansion for query: {query}")
                 prompt = template_query_fusion_survery_forcus.format(
@@ -905,7 +906,7 @@ class AcademicTreeSearchEngine:
                     previous_year=previous_year,
                 )
                 prompt_type = "survey"
-            elif FUSION_TEMP == "AUTOMATIC" and self._is_complex_domain(domain):
+            elif FUSION_TEMPLATE == "AUTOMATIC" and self._is_complex_domain(domain):
                 # For queries in complex or specialized domains, use domain-aware expansion
                 logger.info(f"Using domain-aware expansion for query in {domain}")
                 prompt = template_domain_aware_query_expansion.format(
@@ -917,12 +918,12 @@ class AcademicTreeSearchEngine:
                     previous_year=previous_year,
                 )
                 prompt_type = "domain"
-            elif FUSION_TEMP == "PASA":
+            elif FUSION_TEMPLATE == "PASA":
                 # Use PASA template if explicitly configured
                 logger.info(f"Using PASA template for query expansion")
                 prompt = template_query_fusion_pasa.format(user_query=query)
                 prompt_type = "pasa"
-            elif FUSION_TEMP == "WITHEXPLAIN":
+            elif FUSION_TEMPLATE == "WITHEXPLAIN":
                 # Use withexplain template if explicitly configured
                 logger.info(f"Using withexplain for query: {query}")
                 prompt = (
@@ -998,7 +999,7 @@ class AcademicTreeSearchEngine:
                     logger.warning(
                         f"LLM expansion failed (attempt {attempt+1}): {str(e)}"
                     )
-                    time.sleep(SLEPP_TIME_LLM)
+                    time.sleep(SLEEP_TIME_LLM)
 
             # If we tried all attempts but still have a valid best response, return it
             if best_response and len(best_response) > 0:
@@ -1303,7 +1304,7 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
             end_date = self.current_date
 
         with concurrent.futures.ThreadPoolExecutor(
-            max_workers=API_PARREL_REQUEST
+            max_workers=API_PARALLEL_REQUEST #wsl
         ) as executor:
             future_to_query = {
                 executor.submit(
@@ -1334,7 +1335,7 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
         )
 
         id2docs = parallel_search_search_paper_from_arxiv(
-            list(unique_arxiv), max_workers=API_PARREL_REQUEST, batch_size=8
+            list(unique_arxiv), max_workers=API_PARALLEL_REQUEST, batch_size=8
         )
 
         output = {}
@@ -1511,15 +1512,15 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
                     doc_info.update(doc_info_new)
                     return doc_info
 
-            elif "PMID" in doc["info"]:
+            elif "PMID" in doc_info:  #wsl
                 # current doc has references, but the info is simple, get full info
-                logger.info(f"source is pumbed, {doc['PMID']}")
-                valid_pmid = [one["pmid"] for one in doc["references"]]
+                logger.info(f"source is pumbed, {doc_info.get('PMID', '')}")
+                valid_pmid = [one["pmid"] for one in doc_info.get("references", [])]
                 already_info,valid_pmid = get_info_from_local(valid_pmid)
                 pmid_info_lst = fetch_pubmed_json(valid_pmid)
                 doc_info["references"] = already_info+pmid_info_lst
 
-            elif "referenceWorksOpenAlex" in doc["info"]:
+            elif "referenceWorksOpenAlex" in doc_info:
                 references = search_doc_via_url_from_openalex(
                     doc_info["referenceWorksOpenAlex"]
                 )
