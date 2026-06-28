@@ -285,6 +285,12 @@ class Reranker(object):
         logger.info(f"Applied reranking updates to {updates_applied} documents")
 
         return reraked_docs
+    def _update_documents_with_reranking(self, reranked_results, original_docs):  #wsl-返回完整的字段用于node排序
+        for idx, result in enumerate(reranked_results):
+            if idx < len(original_docs) and result:
+                original_docs[idx]["rerank_score"] = result.get("rerank_score")
+                original_docs[idx]["rerank_justification"] = result.get("justification", "")
+        return original_docs  # 返回包含所有原始字段的完整列表
 def keep_letters(s):
     letters = [c for c in s if c.isalpha()]
     result = "".join(letters)
