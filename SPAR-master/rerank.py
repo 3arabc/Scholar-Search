@@ -13,7 +13,7 @@ from global_config import RERANK_MODEL
 from typing import List, Dict, Union
 import json
 import os
-
+from log import logger #wsl-71
 
 class Reranker(object):
     def rerank_query_and_doc_list(self,all_docs,user_query,score_name="sim_score"):
