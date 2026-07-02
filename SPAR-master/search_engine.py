@@ -528,6 +528,29 @@ class MultiSearchAgent:
         # Return the query-source mapping along with the results
         return final_query2docs, final_papers, query_source_map, query_keywords2raw
 
+def extract_json(text): #wsl-71
+    """尝试从文本中提取合法的 JSON 对象"""
+    text = text.strip()
+    # 1. 直接解析
+    try:
+        return json.loads(text)
+    except:
+        pass
+    # 2. 尝试提取 Markdown 代码块 ```json ... ```
+    match = re.search(r'```json\s*([\s\S]*?)\s*```', text)
+    if match:
+        try:
+            return json.loads(match.group(1).strip())
+        except:
+            pass
+    # 3. 尝试提取第一个大括号包围的内容
+    match = re.search(r'\{[\s\S]*\}', text)
+    if match:
+        try:
+            return json.loads(match.group())
+        except:
+            pass
+    return None
 
 def _generate_query_from_reference(
     user_query, one_doc, searched_queries
@@ -550,7 +573,11 @@ def _generate_query_from_reference(
             response = get_from_llm(model_inp, model_name=LLM_MODEL_NAME)
             logger.info(f"response: {response}")
             response = fetch_string(response)
-            query_list = json.loads(response)
+            query_list = extract_json(response)
+            if query_list is None:
+                logger.warning("Failed to parse JSON, using defaults")
+                # 使用默认值或重试
+                query_list = json.loads(response)
             output = []
             for new_query in query_list:
                 if new_query == "":
@@ -593,7 +620,11 @@ def similarity_code_v4(query, doc, search_time):
         )
         response = get_from_llm(model_inp, model_name=LLM_MODEL_NAME)
         response = fetch_string(response)
-        response = json.loads(response.strip())
+        response = extract_json(response.strip())
+        if response is None:
+            logger.warning("Failed to parse JSON, using defaults")
+            # 使用默认值或重试
+            response = json.loads(response.strip())
         overall_score = [
             response[key]
             for key in [
@@ -698,7 +729,11 @@ class AcademicTreeSearchEngine:
                                         model_name=LLM_MODEL_NAME)
                 response = fetch_string(response)
                 logger.info(f"query correct response: {response}")
-                response = json.loads(response)
+                response = extract_json(response)
+                if response is None:
+                    logger.warning("Failed to parse JSON, using defaults")
+                    # 使用默认值或重试
+                    response = json.loads(response)
                 try:
                     judge_info["expanded_queries_info"]["expanded_queries"] = response
                     return judge_info
@@ -814,7 +849,11 @@ class AcademicTreeSearchEngine:
                 try:
                     response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
                     response = fetch_string(response)
-                    result = json.loads(response)
+                    result = extract_json(response)
+                    if result is None:
+                        logger.warning("Failed to parse JSON, using defaults")
+                        # 使用默认值或重试
+                        result = json.loads(response)
 
                     # Validate the response has required fields
                     if all(
@@ -854,7 +893,11 @@ class AcademicTreeSearchEngine:
                 try:
                     response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
                     response = fetch_string(response)
-                    result = json.loads(response)
+                    result = extract_json(response)
+                    if result is None:
+                        logger.warning("Failed to parse JSON, using defaults")
+                        # 使用默认值或重试
+                        result = json.loads(response)
 
                     # Validate the response has required fields
                     if "needs_expansion" in result and "reason" in result:
@@ -954,14 +997,22 @@ class AcademicTreeSearchEngine:
 
                     # Parse the response based on its format
                     try:
-                        parsed_response = json.loads(response)
+                        parsed_response = extract_json(response)
+                        if parsed_response is None:
+                            logger.warning("Failed to parse JSON, using defaults")
+                            # 使用默认值或重试
+                            parsed_response = json.loads(response)
                     except json.JSONDecodeError as e:
                         logger.warning(f"Failed to parse JSON response: {str(e)}")
                         # Attempt to extract JSON from text if standard parsing fails
                         match = re.search(r"\{.*\}", response, re.DOTALL)
                         if match:
                             try:
-                                parsed_response = json.loads(match.group(0))
+                                parsed_response = extract_json(match.group(0))
+                                if parsed_response is None:
+                                    logger.warning("Failed to parse JSON, using defaults")
+                                    # 使用默认值或重试
+                                    parsed_response = json.loads(match.group(0))
                             except:
                                 logger.warning("Failed to extract JSON from response")
                                 continue
@@ -970,7 +1021,11 @@ class AcademicTreeSearchEngine:
                             match = re.search(r"\[.*\]", response, re.DOTALL)
                             if match:
                                 try:
-                                    parsed_response = json.loads(match.group(0))
+                                    parsed_response = extract_json(match.group(0))
+                                    if parsed_response is None:
+                                        logger.warning("Failed to parse JSON, using defaults")
+                                        # 使用默认值或重试
+                                        parsed_response = json.loads(match.group(0))
                                 except:
                                     logger.warning(
                                         "Failed to extract JSON list from response"

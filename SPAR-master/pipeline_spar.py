@@ -241,22 +241,26 @@ class AcademicSearchTree:
                 sources = expanded_info["suitable_sources"]
                 logger.info(f"Using suitable sources from query expansion: {sources}")
             else:
-                sources = SEARCH_ROUTE
+                sources = SEARCH_ROUTES
                 logger.info(
                     f"No suitable_sources found in expanded_queries_info, using default: {sources}"
                 )
         else:
             # Use default sources based on depth
-            sources = SEARCH_ROUTE if current_depth == 1 else ["arxiv"]
+            sources = SEARCH_ROUTES if current_depth == 1 else ["arxiv"]
             logger.info(f"Using depth-based sources: {sources}")
 
         if "arxiv" not in sources:
             sources.insert(0, "arxiv")
             logger.info(f"Adding 'arxiv' to sources: {sources}")
 
-        if current_depth > 1:
-            logger.info(f"current_depth: {current_depth}, only search arxiv")
-            sources = ["arxiv"]
+        #f current_depth > 1:  #wsl-72去除限制
+        logger.info(f"current_depth: {current_depth}, only search arxiv")
+        sources = ["arxiv"]
+
+        if "openalex" not in sources: #wsl-72搜索包含openalex
+            sources.append("openalex")
+            logger.info("Forced adding openalex to sources")
 
         try:
             # Execute batch search across multiple sources
