@@ -52,6 +52,7 @@ class SearchNode:
         self.parent = parent
         self.depth = parent.depth + 1 if parent else 0
         self.extra = attrs.get("extra", {})  # Additional attributes
+        self.reranker = None  # wsl-72
 
     def convert_to_dict(self) -> dict:
         """Convert node to dictionary format for serialization"""

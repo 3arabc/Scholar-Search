@@ -86,7 +86,9 @@ class MultiSearchAgent:
                     return [kw.strip() for kw in keywords.split(",") if kw.strip()][:KEY_WORDS_NUM]
             except:
                 logger.error(f"Failed to extract keywords: {traceback.format_exc()}")
-        return []
+        #return []
+        logger.warning(f"Keyword extraction failed, using original query as keyword: {query}") #wsl-72，无延申词可以使用原关键词搜索
+        return [query]
 
     def _google_arxiv_search(
         self,
