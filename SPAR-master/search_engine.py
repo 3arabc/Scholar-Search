@@ -622,11 +622,13 @@ def similarity_code_v4(query, doc, search_time):
         )
         response = get_from_llm(model_inp, model_name=LLM_MODEL_NAME)
         response = fetch_string(response)
-        response = extract_json(response.strip())
-        if response is None:
+        response_new = extract_json(response.strip())
+        if response_new is None:
             logger.warning("Failed to parse JSON, using defaults")
             # 使用默认值或重试
             response = json.loads(response.strip())
+        else:
+            response = response_new
         overall_score = [
             response[key]
             for key in [
@@ -731,13 +733,13 @@ class AcademicTreeSearchEngine:
                                         model_name=LLM_MODEL_NAME)
                 response = fetch_string(response)
                 logger.info(f"query correct response: {response}")
-                response = extract_json(response)
-                if response is None:
+                response_new = extract_json(response)
+                if response_new is None:
                     logger.warning("Failed to parse JSON, using defaults")
                     # 使用默认值或重试
-                    response = json.loads(response)
+                    response_new = json.loads(response)
                 try:
-                    judge_info["expanded_queries_info"]["expanded_queries"] = response
+                    judge_info["expanded_queries_info"]["expanded_queries"] = response_new
                     return judge_info
                 except:
                     logger.error(
