@@ -70,12 +70,12 @@ class MultiSearchAgent:
         self.current_date = "2025-03-24"  # 当前日期，参考你的需求
 
     def extract_keywords(self, query: str, source: str = "semantic") -> List[str]:
-        """Extract keywords from query optimized for a specific source."""
+        """Extract keywords from a query optimized for a specific source."""
         query = query.lower()
         model_inp = template_extract_keywords_source_aware.format(
             user_query=query, source=source
         )
-        for _ in range(4):
+        for _ in range(1):
             try:
                 response = get_from_llm(model_inp, model_name=LLM_MODEL_NAME)
                 pattern = r"\[Start\](.*?)\[End\]"
@@ -95,20 +95,14 @@ class MultiSearchAgent:
         searched_docs: Dict[str, Any] = None,
     ) -> SearchResult:
         """Execute Google Scholar search for a list of queries."""
+        merged_papers: Dict[str, Any] = {}
+        query2docs: Dict[str, List] = {query: [] for query in queries}
+
+        if searched_docs is None:
+            searched_docs = {}
+
         try:
-
-            if searched_docs is None:
-                searched_docs = {}
-
-            # 如果 end_date 为空，使用当前日期
-
-            # if not end_date:
-            #     end_date = self.current_date
-
             # Step 1: 并行搜索 arxiv_ids
-            merged_papers = {}
-            query2docs = {query: [] for query in queries}
-
             results = {}
             with concurrent.futures.ThreadPoolExecutor(
                 max_workers=self.max_workers
@@ -122,7 +116,7 @@ class MultiSearchAgent:
                 for future in concurrent.futures.as_completed(future_to_query):
                     query = future_to_query[future]
                     try:
-                        results[query] = future.result(timeout=2)
+                        results[query] = future.result()
                     except Exception as e:
                         logger.error(
                             f"Google search failed for query {query}: {str(e)}"
@@ -145,7 +139,7 @@ class MultiSearchAgent:
             )
 
             # Step 3: 统一获取论文详情
-            id2docs = {}
+            id2docs: Dict[str, Any] = {}
             if unique_arxiv:
                 id2docs = parallel_search_search_paper_from_arxiv(
                     list(unique_arxiv),
@@ -154,7 +148,6 @@ class MultiSearchAgent:
                 )
 
             # Step 4: 合并结果
-
             for query, arxiv_ids in results.items():
                 for arxiv_id in arxiv_ids:
                     if arxiv_id in id2docs:
@@ -163,10 +156,10 @@ class MultiSearchAgent:
                         query2docs[query].append(paper_info)
         except:
             logger.error(f"google search error: {traceback.format_exc()}")
-        finally:
-            return SearchResult(
-                source="arxiv", papers=merged_papers, query2paper=query2docs
-            )
+
+        return SearchResult(
+            source="arxiv", papers=merged_papers, query2paper=query2docs
+        )
 
     def _semantic_search(
         self, keyword: str, raw_query: str, end_date: str = "", max_papers: int = 15
@@ -561,9 +554,9 @@ def _generate_query_from_reference(
             return output
         except:
             logger.error(
-                f"Failed to parse response: {response}, will retry {SLEPP_TIME_LLM} seconds...; Error: {traceback.format_exc()}"
+                f"Failed to parse response: {response}, will retry {SLEEP_TIME_LLM} seconds...; Error: {traceback.format_exc()}"
             )
-            time.sleep(SLEPP_TIME_LLM)
+            time.sleep(SLEEP_TIME_LLM)
     return []
 
 
@@ -757,7 +750,7 @@ class AcademicTreeSearchEngine:
             result["domain"] = "undefined"
             result["suitable_sources"] = ["arxiv", "openalex"]
 
-        # Step 2: Determine if query needs expansion
+        # Step 2: Determine if a query needs expansion
         try:
             expansion_analysis = self._evaluate_expansion_need(query, result["domain"])
             if expansion_analysis:
@@ -826,7 +819,7 @@ class AcademicTreeSearchEngine:
                     logger.warning(
                         f"LLM analysis failed (attempt {attempt+1}): {str(e)}"
                     )
-                    time.sleep(SLEPP_TIME_LLM)
+                    time.sleep(SLEEP_TIME_LLM)
 
             logger.error("All attempts to analyze query intent failed")
             return None
@@ -863,7 +856,7 @@ class AcademicTreeSearchEngine:
                     logger.warning(
                         f"LLM expansion evaluation failed (attempt {attempt+1}): {str(e)}"
                     )
-                    time.sleep(SLEPP_TIME_LLM)
+                    time.sleep(SLEEP_TIME_LLM)
 
             logger.error("All attempts to evaluate expansion need failed")
             return None
@@ -998,7 +991,7 @@ class AcademicTreeSearchEngine:
                     logger.warning(
                         f"LLM expansion failed (attempt {attempt+1}): {str(e)}"
                     )
-                    time.sleep(SLEPP_TIME_LLM)
+                    time.sleep(SLEEP_TIME_LLM)
 
             # If we tried all attempts but still have a valid best response, return it
             if best_response and len(best_response) > 0:
@@ -1314,7 +1307,7 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
             for future in concurrent.futures.as_completed(future_to_query):
                 query = future_to_query[future]
                 try:
-                    results[query] = future.result(timeout=2)
+                    results[query] = future.result()
                 except Exception as e:
                     logger.error(f"Search failed for query {query}: {str(e)}")
                     results[query] = []

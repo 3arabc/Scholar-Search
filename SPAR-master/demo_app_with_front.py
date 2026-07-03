@@ -18,7 +18,7 @@ import traceback
 # 添加项目路径
 from pipeline_spar import AcademicSearchTree
 from search_engine import MultiSearchAgent
-
+from citation_generator import get_citation_generator
 from log import logger
 
 app = FastAPI(title="Scholar Paper Search API with Frontend", version="1.0.0")
@@ -206,9 +206,34 @@ def standardize_paper_data(paper_data, paper_id=None, source='unknown'):
         if standardized_paper['year']:
             standardized_paper['year'] = str(standardized_paper['year'])
             standardized_paper['publicationYear'] = standardized_paper['year']
+        # ========== 🆕 引用格式生成 ==========
+        from citation_generator import get_citation_generator
+        citation_gen = get_citation_generator()
+        if standardized_paper.get('title') and standardized_paper.get('title') != 'No title available':
+            try:
+                standardized_paper['citations'] = citation_gen.generate_all_citations(standardized_paper)
+                standardized_paper['citation_apa'] = standardized_paper['citations'].get('apa', '')
+                standardized_paper['citation_mla'] = standardized_paper['citations'].get('mla', '')
+                standardized_paper['citation_chicago'] = standardized_paper['citations'].get('chicago', '')
+                standardized_paper['citation_bibtex'] = standardized_paper['citations'].get('bibtex', '')
+                standardized_paper['citation_gb7714'] = standardized_paper['citations'].get('gb7714', '')
+            except Exception as e:
+                logger.error(f"Failed to generate citations for {paper_id}: {str(e)}")
+                standardized_paper['citations'] = {}
+                standardized_paper['citation_apa'] = ''
+                standardized_paper['citation_mla'] = ''
+                standardized_paper['citation_chicago'] = ''
+                standardized_paper['citation_bibtex'] = ''
+                standardized_paper['citation_gb7714'] = ''
+        else:
+            standardized_paper['citations'] = {}
+            standardized_paper['citation_apa'] = ''
+            standardized_paper['citation_mla'] = ''
+            standardized_paper['citation_chicago'] = ''
+            standardized_paper['citation_bibtex'] = ''
+            standardized_paper['citation_gb7714'] = ''
 
         return standardized_paper
-
     except Exception as e:
         logger.error(f"Error standardizing paper data: {str(e)}")
         logger.error(f"Paper data: {paper_data}")
@@ -481,6 +506,51 @@ async def get_search_modes():
                 ]
             }
         }
+    }
+
+
+@app.get("/paper/{paper_id}/citation")
+async def get_paper_citation(paper_id: str, style: str = "apa"):
+    """
+    获取单篇论文的引用格式
+
+    Args:
+        paper_id: 论文ID
+        style: 引用格式 (apa, mla, chicago, bibtex, gb7714)
+    """
+    # 从数据库或搜索结果中获取论文信息
+    from local_db_v2 import ArxivDatabase, db_path
+    try:
+        with ArxivDatabase(db_path) as db:
+            paper = db.get(paper_id)  # 从数据库查询
+            if not paper:
+                raise HTTPException(status_code=404, detail="Paper not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+    citation_gen = get_citation_generator()
+    style_map = {
+        "apa": citation_gen.format_apa,
+        "mla": citation_gen.format_mla,
+        "chicago": citation_gen.format_chicago,
+        "bibtex": citation_gen.generate_bibtex,
+        "gb7714": citation_gen.format_gb7714,
+        "all": citation_gen.generate_all_citations
+    }
+
+    if style not in style_map:
+        raise HTTPException(status_code=400, detail=f"Unsupported style: {style}")
+
+    if style == "all":
+        result = style_map[style](paper)
+    else:
+        result = style_map[style](paper)
+
+    return {
+        "paper_id": paper_id,
+        "title": paper.get("title", ""),
+        "style": style,
+        "citation": result
     }
 
 if __name__ == "__main__":

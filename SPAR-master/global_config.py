@@ -21,9 +21,9 @@ API_KEY = os.getenv(
 )
 ENDPOINT = os.getenv(
     "SILICONFLOW_BASE_URL",
-    "https://api.siliconflow.cn/v1",
+    "https://api.siliconflow.cn/v1/chat/completions",
 )
-DEPLOYMENT_NAME = "deepseek-ai/DeepSeek-V3.2"
+DEPLOYMENT_NAME = "Qwen3-30B-Instruct"
 
 # =============================================================================
 # PIPELINE CONFIGURATION
@@ -48,7 +48,7 @@ LENGTH_GEN_QUERY_FROM_CITATION = 12288
 TRY_COUNT = 4
 LLM_TRY_COUNT = 4
 LLM_PARALLEL_NUM = 4
-LLM_MODEL_NAME = "deepseek-ai/DeepSeek-V3.2"  # "Qwen3-8B"
+LLM_MODEL_NAME = "Qwen3-30B-Instruct"  # "Qwen3-8B"
 
 
 API_TRY_COUNT = 4
@@ -84,7 +84,7 @@ SEARCH_ROUTES: List[str] = ["arxiv", "openalex"]
 # EXTERNAL API KEYS
 # =============================================================================
 # Register at: https://google.serper.dev/search
-GOOGLE_SERPER_KEY = os.getenv("GOOGLE_SERPER_KEY", "xxx")
+GOOGLE_SERPER_KEY = os.getenv("GOOGLE_SERPER_KEY", None)
 
 # Semantic Scholar API key (currently invalid)
 S2_API_KEY = os.getenv("S2_API_KEY", None)
@@ -100,9 +100,15 @@ LLM_PARREL_NUM=2
 # =============================================================================
 # NETWORK CONFIGURATION
 # =============================================================================
+"""
 PROXIES: Dict[str, str] = {
     "http": os.getenv("HTTP_PROXY", "http://localhost:1080"),
     "https": os.getenv("HTTPS_PROXY", "http://localhost:1080")
+}
+"""
+PROXIES: Dict[str, str] = {
+    # "http": os.getenv("HTTP_PROXY", "http://127.0.0.1:7890"),  # 改为你的代理端口
+    # "https": os.getenv("HTTPS_PROXY", "http://127.0.0.1:7890")  # Clash 默认 7890
 }
 
 # ArXiv client configuration
