@@ -59,3 +59,9 @@ htmlcov/
 
 # === IPython 历史 ===
 ~/.ipython/
+
+# 忽略所有评估结果和临时文件
+gen_result/
+*.json
+*.pdf
+*.log

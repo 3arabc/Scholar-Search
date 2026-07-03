@@ -24,8 +24,7 @@ import requests
 import time
 import traceback
 
-Entrez.email = "xxx@163.com"  # 替换为你的邮箱
-
+Entrez.email = "3453252699@qq.com"  # 替换为你的邮箱
 
 def fetch_pubmed_json(pmid_list):
     """
@@ -544,6 +543,12 @@ def search_paper_via_query_from_openalex(
 ):
     """从openalex获取相关论文，要输入关键词，不支持自然语言的输入，效果不好"""
     try:
+        # ========== 🆕 读取 OpenAlex API Key ==========
+        OPENALEX_API_KEY = os.getenv("OPENALEX_API_KEY", "")
+        if OPENALEX_API_KEY:
+            logger.info("Using OpenAlex API Key for authentication")
+        else:
+            logger.warning("OpenAlex API Key not set, using anonymous access (rate-limited)")
         logger.info("search_paper_via_query_from_openalex")
         base_url = "https://api.openalex.org/works"
         current_year = datetime.now().year
@@ -557,8 +562,16 @@ def search_paper_via_query_from_openalex(
             "per-page": per_page,
         }
         for i in range(4):
-            response = requests.get(base_url, params=params)
-
+            headers = {}
+            if OPENALEX_API_KEY:
+                headers["Authorization"] = f"Bearer {OPENALEX_API_KEY}"
+            
+            response = requests.get(
+                base_url, 
+                params=params, 
+                headers=headers,  # 添加认证头
+                timeout=30
+            )
             if response.status_code == 200:
                 data = response.json()
                 search_docs = {}
@@ -783,57 +796,61 @@ def search_paper_via_query_from_semantic(query, max_paper_num=15, end_date=None)
 
 
 def google_search_arxiv_id(query, try_num=4, num=10, end_date=""):
-    """从google搜索arxiv id, 要是用api，免费额度2500"""
-    # refer from: https://serper.dev/playground
+    """从google搜索arxiv id，使用api"""
+    import urllib.parse
+    
     url = "https://google.serper.dev/search"
-    search_query = f"{query} site:arxiv.org"
-    # logger.info(f"end_date: {end_date}")
+    
+    # ========== 🆕 修改搜索词构建方式 ==========
+    # 原方式：search_query = f"{query} site:arxiv.org"
+    # 新方式：直接添加 arxiv 关键词，让 Google 自然搜索
     if end_date != "":
         try:
             end_date = datetime.strptime(end_date, "%Y%m%d").strftime("%Y-%m-%d")
-            search_query = f"{query} before:{end_date} site:arxiv.org"
+            search_query = f"{query} arxiv before:{end_date}"
         except:
-            search_query = f"{query} site:arxiv.org"
-
-    payload = json.dumps(
-        {
-            "q": search_query,
-            "num": num,
-            # "autocorrect": True,
-            "page": 1,
-            # "type":"search"
-        }
-    )
+            search_query = f"{query} arxiv"
+    else:
+        search_query = f"{query} arxiv"
 
     GOOGLE_SERPER_KEY = os.getenv("GOOGLE_SERPER_KEY", "xxx")
-    logger.info(f"use GOOGLE_SERPER_KEY: {GOOGLE_SERPER_KEY}")
-    headers = {"X-API-KEY": GOOGLE_SERPER_KEY, "Content-Type": "application/json"}
-    assert headers["X-API-KEY"] != "your google keys", "add your google search key!!!"
+    logger.info(f"use GOOGLE_SERPER_KEY: {GOOGLE_SERPER_KEY[:10]}...")
+    
+    headers = {"X-API-KEY": GOOGLE_SERPER_KEY}
+    params = {"q": search_query, "num": num}
+    
+    assert headers["X-API-KEY"] != "xxx", "add your google search key!!!"
 
     for _ in range(try_num):
         try:
-            response = requests.request(
-                "POST", url, headers=headers, data=payload, timeout=10, proxies=PROXIES
+            response = requests.get(
+                url, 
+                headers=headers, 
+                params=params, 
+                timeout=10, 
+                proxies=PROXIES
             )
+            
             if response.status_code == 200:
-                results = json.loads(response.text)
-                logger.info(f"results: {results}")
+                results = response.json()
                 arxiv_id_list = []
-                for paper in results["organic"]:
-                    link = paper["link"]
-                    match = re.search("arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d+)", link)
+                
+                # 从 organic 结果中提取 arXiv ID
+                for paper in results.get("organic", []):
+                    link = paper.get("link", "")
+                    match = re.search(r"arxiv\.org/(?:abs|pdf|html)/(\d{4}\.\d+)", link)
                     if match:
                         arxiv_id = match.group(1)
                         arxiv_id_list.append(arxiv_id)
+                
+                # 去重
                 res = list(set(arxiv_id_list))
-                logger.info(f"google_search_arxiv_id success: {len(res)}")
+                logger.info(f"google_search_arxiv_id success: found {len(res)} arXiv IDs")
                 return res
             else:
-                logger.error(f"google_search_arxiv_id response: {response}")
-        except:
-            logger.error(
-                f"google search failed, query: {query}; Error: {traceback.format_exc()}"
-            )
+                logger.error(f"google_search_arxiv_id response: {response.status_code}")
+        except Exception as e:
+            logger.error(f"google search failed, query: {query}; Error: {traceback.format_exc()}")
             continue
     return []
 
