@@ -233,6 +233,25 @@ def standardize_paper_data(paper_data, paper_id=None, source='unknown'):
             standardized_paper['citation_bibtex'] = ''
             standardized_paper['citation_gb7714'] = ''
 
+        # 假设标准化后的变量为 standardized_paper  #wsl-73错觉处理
+        # 检查关键字段是否存在且非空
+        title = standardized_paper.get('title', '').strip()
+        abstract = standardized_paper.get('abstract', '').strip()
+        paper_id = standardized_paper.get('paper_id', '').strip()
+        # 判断是否为有效论文
+        is_valid = bool(title and abstract and paper_id)
+        standardized_paper['is_valid'] = is_valid
+
+        # 可以额外添加 invalid_reason 字段，用于调试
+        if not is_valid:
+            missing = []
+            if not title: missing.append('title')
+            if not abstract: missing.append('abstract')
+            if not paper_id: missing.append('paper_id')
+            standardized_paper['invalid_reason'] = f"Missing: {', '.join(missing)}"
+        else:
+            standardized_paper['invalid_reason'] = ''
+
         return standardized_paper
     except Exception as e:
         logger.error(f"Error standardizing paper data: {str(e)}")
@@ -260,7 +279,7 @@ def standardize_paper_data(paper_data, paper_id=None, source='unknown'):
         }
 
 
-def process_paper_collection(papers_data, source='unknown', is_dict_format=True):
+def process_paper_collection(papers_data, source='unknown', is_dict_format=True, filter_invalid=True): #wsl-73错觉
     """
     批量处理论文数据集合
 
@@ -321,6 +340,12 @@ def process_paper_collection(papers_data, source='unknown', is_dict_format=True)
     except Exception as e:
         logger.error(f"Error processing paper collection: {str(e)}")
 
+    if filter_invalid: #wsl-73错觉
+        # 过滤掉无效论文
+        papers_list = [p for p in papers_list if p.get('is_valid', False)]
+        # 更新字典
+        papers_dict = {p['paper_id']: p for p in papers_list}
+
     return papers_list, papers_dict
 
 
@@ -360,9 +385,9 @@ async def _advanced_search(request: SearchRequest) -> SearchResponse:
 
                 # 使用统一的数据处理函数
                 if isinstance(sorted_docs, dict):
-                    papers_list, papers_dict = process_paper_collection(sorted_docs, 'advanced_search', is_dict_format=True)
+                    papers_list, papers_dict = process_paper_collection(sorted_docs, 'advanced_search', is_dict_format=True, filter_invalid=True)
                 elif isinstance(sorted_docs, list):
-                    papers_list, papers_dict = process_paper_collection(sorted_docs, 'advanced_search', is_dict_format=False)
+                    papers_list, papers_dict = process_paper_collection(sorted_docs, 'advanced_search', is_dict_format=False, filter_invalid=True)
                 else:
                     logger.warning(f"Unexpected sorted_docs format: {type(sorted_docs)}")
                     papers_list, papers_dict = [], {}
@@ -394,7 +419,8 @@ async def _advanced_search(request: SearchRequest) -> SearchResponse:
             query_results=all_results,
             all_papers=all_papers,
             query_source_map=query_source_map,
-            search_tree=search_trees
+            search_tree=search_trees,
+            valid_papers = sum(1 for p in all_papers.values() if p.get('is_valid', False))  # wsl-73
         )
 
         logger.info(f"Advanced search completed successfully. Found {len(all_papers)} papers")
@@ -410,7 +436,8 @@ async def _advanced_search(request: SearchRequest) -> SearchResponse:
             query_results={},
             all_papers={},
             query_source_map={},
-            search_tree={"error": str(e)}
+            search_tree={"error": str(e)},
+            valid_papers=sum(1 for p in all_papers.values() if p.get('is_valid', False))  # wsl-73
         )
 
 
@@ -438,11 +465,11 @@ async def _simple_search(request: SearchRequest) -> SearchResponse:
 
         # 处理query_results - 每个query对应一个论文列表
         for query, papers in query_results.items():
-            papers_list, _ = process_paper_collection(papers, 'simple_search', is_dict_format=False)
+            papers_list, _ = process_paper_collection(papers, 'simple_search', is_dict_format=False, filter_invalid=True)
             standardized_query_results[query] = papers_list
 
         # 处理all_papers - 字典格式 {paper_id: paper_data}
-        _, standardized_all_papers = process_paper_collection(all_papers, 'simple_search', is_dict_format=True)
+        _, standardized_all_papers = process_paper_collection(all_papers, 'simple_search', is_dict_format=True, filter_invalid=True)
 
         # 构造响应
         response = SearchResponse(
@@ -451,7 +478,8 @@ async def _simple_search(request: SearchRequest) -> SearchResponse:
             query_results=standardized_query_results,
             all_papers=standardized_all_papers,
             query_source_map=query_source_map,
-            search_tree=None  # 简单搜索不生成搜索树
+            search_tree=None,  # 简单搜索不生成搜索树
+            valid_papers=sum(1 for p in all_papers.values() if p.get('is_valid', False))  # wsl-73
         )
 
         logger.info(f"Simple search completed successfully. Found {len(standardized_all_papers)} papers")
@@ -467,7 +495,8 @@ async def _simple_search(request: SearchRequest) -> SearchResponse:
             query_results={},
             all_papers={},
             query_source_map={},
-            search_tree={"error": str(e)}
+            search_tree={"error": str(e)},
+            valid_papers=sum(1 for p in all_papers.values() if p.get('is_valid', False))  # wsl-73
         )
 
 

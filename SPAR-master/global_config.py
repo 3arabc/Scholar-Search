@@ -17,7 +17,7 @@ DEBUG = False
 # =============================================================================
 API_KEY = os.getenv(
     "SILICONFLOW_API_KEY",
-    "your_openai_api_key_here",
+    "sk-uejssktdixvxpaorxeonyztxomulwlnxkqmnisonsiffepsn",
 )
 ENDPOINT = os.getenv(
     "SILICONFLOW_BASE_URL",
@@ -28,16 +28,21 @@ DEPLOYMENT_NAME = "Qwen3-30B-Instruct"
 # =============================================================================
 # PIPELINE CONFIGURATION
 # =============================================================================
+
+# wsl-73精准过滤配置
+ENABLE_LLM_RERANK = True        # 是否启用 LLM 二次过滤
+LLM_RERANK_THRESHOLD = 0.7      # 保留分数阈值
+
 SAVE_ID2DOCS = True
 RELEVANCE_SCORE = 0.5
-WEB_RETRY_NUM = 1
+WEB_RETRY_NUM = 2 #wsl-71
 
-# Query threshold settings
+# Query threshold settings #wsl-71阈值改小一点 #0.8，0.85
 QUERY_LOW_THRESHOLD = 0.2
-QUERY_HIGH_THRESHOLD = 0.8
-CORRECT_SCORE_THRESHOLD = 0.8
-EXPAND_SCORE_THRESHOLD = 0.85
-QUERY_TO_SEARCH_THRESHOLD = 0.85
+QUERY_HIGH_THRESHOLD = 0.7
+CORRECT_SCORE_THRESHOLD = 0.7
+EXPAND_SCORE_THRESHOLD = 0.8
+QUERY_TO_SEARCH_THRESHOLD = 0.8
 
 # Generation settings
 LENGTH_GEN_QUERY_FROM_CITATION = 12288
@@ -63,19 +68,19 @@ DO_FUSION_JUDGE = True
 FUSION_TEMPLATE = "AUTOMATIC"  # Options: "WITHEXPLAIN", "AUTOMATIC"
 
 # Query processing settings
-QUERY_NUM_PRUNED = 2  # Number of queries to use for search
+QUERY_NUM_PRUNED = 4  #wsl-71 Number of queries to use for search
 RETRIEVAL_QUERY_BATCH_SIZE = 6  # Batch size for query processing to avoid excessive searching
 
 # Document processing settings
 DOCS_TO_EXPAND = 40
-REFERENCE_DOC_PRUNED = 20  # Number of references to extract from each relevant document
+REFERENCE_DOC_PRUNED = 40  #wsl-71 Number of references to extract from each relevant document
 REFERENCE_OCCUR_FREQUENCY = 0.6
-REFERENCE_DOC_NUM_TO_GEN_NEW_QUERY = 2  # Number of reference docs used to generate new queries
+REFERENCE_DOC_NUM_TO_GEN_NEW_QUERY = 10  #wsl-71 Number of reference docs used to generate new queries
 
-# Similarity thresholds
-REFERENCE_DOC_SIM_THRESHOLD = 0.6
-BEGIN_SIM_THRESHOLD = 0.5
-PASS_SIM_THRESHOLD = 0.5
+# Similarity thresholds #wsl-71相似度阈值，影响大 #0.6，0.5
+REFERENCE_DOC_SIM_THRESHOLD = 0.4
+BEGIN_SIM_THRESHOLD = 0.3
+PASS_SIM_THRESHOLD = 0.3
 
 # Search routes configuration
 SEARCH_ROUTES: List[str] = ["arxiv", "openalex"]
@@ -84,8 +89,8 @@ SEARCH_ROUTES: List[str] = ["arxiv", "openalex"]
 # EXTERNAL API KEYS
 # =============================================================================
 # Register at: https://google.serper.dev/search
-GOOGLE_SERPER_KEY = os.getenv("GOOGLE_SERPER_KEY", None)
-
+GOOGLE_SERPER_KEY = os.getenv("GOOGLE_SERPER_KEY", "xxx")
+OPENALEX_API_KEY = os.getenv("OPENALEX_API_KEY", None)
 # Semantic Scholar API key (currently invalid)
 S2_API_KEY = os.getenv("S2_API_KEY", None)
 
@@ -94,6 +99,7 @@ S2_API_KEY = os.getenv("S2_API_KEY", None)
 # =============================================================================
 DO_REFERENCE_SEARCH = False  # Toggle reference-based search
 RERANK =os.getenv("DO_RERANK",True)
+RERANK = True #wsl-73
 
 KEY_WORDS_NUM =2
 LLM_PARREL_NUM=2

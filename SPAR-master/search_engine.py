@@ -86,7 +86,9 @@ class MultiSearchAgent:
                     return [kw.strip() for kw in keywords.split(",") if kw.strip()][:KEY_WORDS_NUM]
             except:
                 logger.error(f"Failed to extract keywords: {traceback.format_exc()}")
-        return []
+        #return []
+        logger.warning(f"Keyword extraction failed, using original query as keyword: {query}") #wsl-72，无延申词可以使用原关键词搜索
+        return [query]
 
     def _google_arxiv_search(
         self,
@@ -165,7 +167,8 @@ class MultiSearchAgent:
         self, keyword: str, raw_query: str, end_date: str = "", max_papers: int = 15
     ) -> SearchResult:
         """Execute Semantic Scholar search."""
-        logger.info(f"Searching Semantic Scholar for '{query}'")
+        #logger.info(f"Searching Semantic Scholar for '{query}'")
+        logger.info(f"Searching Semantic Scholar for '{keyword}'")  #wsl
         try:
             papers = search_paper_via_query_from_semantic(
                 query=keyword, max_paper_num=max_papers
@@ -520,6 +523,29 @@ class MultiSearchAgent:
         # Return the query-source mapping along with the results
         return final_query2docs, final_papers, query_source_map, query_keywords2raw
 
+def extract_json(text): #wsl-71
+    """尝试从文本中提取合法的 JSON 对象"""
+    text = text.strip()
+    # 1. 直接解析
+    try:
+        return json.loads(text)
+    except:
+        pass
+    # 2. 尝试提取 Markdown 代码块 ```json ... ```
+    match = re.search(r'```json\s*([\s\S]*?)\s*```', text)
+    if match:
+        try:
+            return json.loads(match.group(1).strip())
+        except:
+            pass
+    # 3. 尝试提取第一个大括号包围的内容
+    match = re.search(r'\{[\s\S]*\}', text)
+    if match:
+        try:
+            return json.loads(match.group())
+        except:
+            pass
+    return None
 
 def _generate_query_from_reference(
     user_query, one_doc, searched_queries
@@ -542,7 +568,12 @@ def _generate_query_from_reference(
             response = get_from_llm(model_inp, model_name=LLM_MODEL_NAME)
             logger.info(f"response: {response}")
             response = fetch_string(response)
-            query_list = json.loads(response)
+            query_list = extract_json(response)
+            if query_list is None:
+                logger.warning("Failed to parse JSON, using defaults")
+                # 使用默认值或重试
+                #query_list = json.loads(response)
+                return None
             output = []
             for new_query in query_list:
                 if new_query == "":
@@ -556,7 +587,7 @@ def _generate_query_from_reference(
             logger.error(
                 f"Failed to parse response: {response}, will retry {SLEEP_TIME_LLM} seconds...; Error: {traceback.format_exc()}"
             )
-            time.sleep(SLEEP_TIME_LLM)
+            time.sleep(SLEEP_TIME_LLM) #wsl-小bug
     return []
 
 
@@ -585,7 +616,14 @@ def similarity_code_v4(query, doc, search_time):
         )
         response = get_from_llm(model_inp, model_name=LLM_MODEL_NAME)
         response = fetch_string(response)
-        response = json.loads(response.strip())
+        response_new = extract_json(response.strip())
+        if response_new is None:
+            logger.warning("Failed to parse JSON, using defaults")
+            # 使用默认值或重试
+            #response = json.loads(response.strip())
+            return None
+        else:
+            response = response_new
         overall_score = [
             response[key]
             for key in [
@@ -601,6 +639,48 @@ def similarity_code_v4(query, doc, search_time):
         logger.error(f"similarity_code_v4 error {traceback.format_exc()}")
         return {}
 
+def llm_relevance_score(query: str, doc: Dict) -> float:  #wsl-73 二次筛选
+    """
+    使用 LLM 对单篇论文进行相关性评分，返回 0-1 之间的分数。
+    采用更严格的评价标准，包括：
+        - 标题与查询的匹配度
+        - 摘要内容是否直接回答/相关
+        - 研究领域是否匹配
+        - 是否为综述性或技术性文章（根据查询意图）
+    """
+    prompt = f"""你是一位学术研究助手，需要评估以下论文与用户查询的相关性。
+
+用户查询：{query}
+
+论文信息：
+标题：{doc.get('title', '')}
+摘要：{doc.get('abstract', '')}
+领域：{doc.get('fieldsOfStudy', '')}
+
+请从以下维度对论文进行评分（0-1分，精确到小数点后2位）：
+1. 主题匹配度（标题是否直接相关）
+2. 内容深度（摘要是否覆盖查询核心问题）
+3. 研究领域的一致性
+4. 论文类型（如综述、实验、理论）是否符合需求
+
+请仅输出一个分数（如 0.85），不要有任何其他文字。
+"""
+    for attempt in range(LLM_TRY_COUNT):
+        try:
+            response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
+            # 提取分数（支持多种格式）
+            match = re.search(r'(\d+\.\d+|\d+)', response.strip())
+            if match:
+                score = float(match.group(1))
+                # 确保在 0-1 范围内
+                return max(0.0, min(1.0, score))
+            else:
+                logger.warning(f"LLM returned no numeric score: {response}")
+        except Exception as e:
+            logger.error(f"LLM relevance scoring failed: {e}")
+            time.sleep(SLEEP_TIME_LLM)
+    # 如果多次失败，返回原始 sim_score（fallback）
+    return doc.get('sim_score', 0.0)
 
 def similarity_code_v5(query, doc):
     output = {}
@@ -680,7 +760,7 @@ class AcademicTreeSearchEngine:
 
     def expand_query_native(self,query:str):
         judge_info = {"expanded_queries_info":{}}
-        for _ in range(WEB_TRYNUM):
+        for _ in range(WEB_RETRY_NUM):  #wsl-原WEB_TRYNUM
             try:
                 # model_inp = template_query_fusion.format(user_query=query)
                 model_inp = template_query_fusion_pasa.format(user_query=query)
@@ -690,9 +770,14 @@ class AcademicTreeSearchEngine:
                                         model_name=LLM_MODEL_NAME)
                 response = fetch_string(response)
                 logger.info(f"query correct response: {response}")
-                response = json.loads(response)
+                response_new = extract_json(response)
+                if response_new is None:
+                    logger.warning("Failed to parse JSON, using defaults")
+                    # 使用默认值或重试
+                    #response_new = json.loads(response)
+                    return None
                 try:
-                    judge_info["expanded_queries_info"]["expanded_queries"] = response
+                    judge_info["expanded_queries_info"]["expanded_queries"] = response_new
                     return judge_info
                 except:
                     logger.error(
@@ -806,7 +891,12 @@ class AcademicTreeSearchEngine:
                 try:
                     response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
                     response = fetch_string(response)
-                    result = json.loads(response)
+                    result = extract_json(response)
+                    if result is None:
+                        logger.warning("Failed to parse JSON, using defaults")
+                        # 使用默认值或重试
+                        #result = json.loads(response)
+                        return None
 
                     # Validate the response has required fields
                     if all(
@@ -819,7 +909,7 @@ class AcademicTreeSearchEngine:
                     logger.warning(
                         f"LLM analysis failed (attempt {attempt+1}): {str(e)}"
                     )
-                    time.sleep(SLEEP_TIME_LLM)
+                    time.sleep(SLEEP_TIME_LLM) #wsl-小bug
 
             logger.error("All attempts to analyze query intent failed")
             return None
@@ -846,7 +936,12 @@ class AcademicTreeSearchEngine:
                 try:
                     response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
                     response = fetch_string(response)
-                    result = json.loads(response)
+                    result = extract_json(response)
+                    if result is None:
+                        logger.warning("Failed to parse JSON, using defaults")
+                        # 使用默认值或重试
+                        #result = json.loads(response)
+                        return None
 
                     # Validate the response has required fields
                     if "needs_expansion" in result and "reason" in result:
@@ -856,7 +951,7 @@ class AcademicTreeSearchEngine:
                     logger.warning(
                         f"LLM expansion evaluation failed (attempt {attempt+1}): {str(e)}"
                     )
-                    time.sleep(SLEEP_TIME_LLM)
+                    time.sleep(SLEEP_TIME_LLM)  #wsl
 
             logger.error("All attempts to evaluate expansion need failed")
             return None
@@ -888,7 +983,7 @@ class AcademicTreeSearchEngine:
             previous_year = current_year - 1
 
             # Determine the appropriate template based on query analysis
-            if FUSION_TEMP == "AUTOMATIC" and  self._is_survey_focused(intent):
+            if FUSION_TEMPLATE == "AUTOMATIC" and  self._is_survey_focused(intent):  #wsl应该是写错了
                 # For survey-focused queries, prioritize finding comprehensive reviews
                 logger.info(f"Using survey-focused expansion for query: {query}")
                 prompt = template_query_fusion_survery_forcus.format(
@@ -898,7 +993,7 @@ class AcademicTreeSearchEngine:
                     previous_year=previous_year,
                 )
                 prompt_type = "survey"
-            elif FUSION_TEMP == "AUTOMATIC" and self._is_complex_domain(domain):
+            elif FUSION_TEMPLATE == "AUTOMATIC" and self._is_complex_domain(domain):
                 # For queries in complex or specialized domains, use domain-aware expansion
                 logger.info(f"Using domain-aware expansion for query in {domain}")
                 prompt = template_domain_aware_query_expansion.format(
@@ -910,12 +1005,12 @@ class AcademicTreeSearchEngine:
                     previous_year=previous_year,
                 )
                 prompt_type = "domain"
-            elif FUSION_TEMP == "PASA":
+            elif FUSION_TEMPLATE == "PASA":
                 # Use PASA template if explicitly configured
                 logger.info(f"Using PASA template for query expansion")
                 prompt = template_query_fusion_pasa.format(user_query=query)
                 prompt_type = "pasa"
-            elif FUSION_TEMP == "WITHEXPLAIN":
+            elif FUSION_TEMPLATE == "WITHEXPLAIN":
                 # Use withexplain template if explicitly configured
                 logger.info(f"Using withexplain for query: {query}")
                 prompt = (
@@ -946,14 +1041,24 @@ class AcademicTreeSearchEngine:
 
                     # Parse the response based on its format
                     try:
-                        parsed_response = json.loads(response)
+                        parsed_response = extract_json(response)
+                        if parsed_response is None:
+                            logger.warning("Failed to parse JSON, using defaults")
+                            # 使用默认值或重试
+                            #parsed_response = json.loads(response)
+                            return None
                     except json.JSONDecodeError as e:
                         logger.warning(f"Failed to parse JSON response: {str(e)}")
                         # Attempt to extract JSON from text if standard parsing fails
                         match = re.search(r"\{.*\}", response, re.DOTALL)
                         if match:
                             try:
-                                parsed_response = json.loads(match.group(0))
+                                parsed_response = extract_json(match.group(0))
+                                if parsed_response is None:
+                                    logger.warning("Failed to parse JSON, using defaults")
+                                    # 使用默认值或重试
+                                    #parsed_response = json.loads(match.group(0))
+                                    return None
                             except:
                                 logger.warning("Failed to extract JSON from response")
                                 continue
@@ -962,7 +1067,12 @@ class AcademicTreeSearchEngine:
                             match = re.search(r"\[.*\]", response, re.DOTALL)
                             if match:
                                 try:
-                                    parsed_response = json.loads(match.group(0))
+                                    parsed_response = extract_json(match.group(0))
+                                    if parsed_response is None:
+                                        logger.warning("Failed to parse JSON, using defaults")
+                                        # 使用默认值或重试
+                                        #parsed_response = json.loads(match.group(0))
+                                        return None
                                 except:
                                     logger.warning(
                                         "Failed to extract JSON list from response"
@@ -1296,7 +1406,7 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
             end_date = self.current_date
 
         with concurrent.futures.ThreadPoolExecutor(
-            max_workers=API_PARREL_REQUEST
+            max_workers=API_PARALLEL_REQUEST #wsl
         ) as executor:
             future_to_query = {
                 executor.submit(
@@ -1327,7 +1437,7 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
         )
 
         id2docs = parallel_search_search_paper_from_arxiv(
-            list(unique_arxiv), max_workers=API_PARREL_REQUEST, batch_size=8
+            list(unique_arxiv), max_workers=API_PARALLEL_REQUEST, batch_size=8
         )
 
         output = {}
@@ -1504,15 +1614,15 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
                     doc_info.update(doc_info_new)
                     return doc_info
 
-            elif "PMID" in doc["info"]:
+            elif "PMID" in doc_info:  #wsl
                 # current doc has references, but the info is simple, get full info
-                logger.info(f"source is pumbed, {doc['PMID']}")
-                valid_pmid = [one["pmid"] for one in doc["references"]]
+                logger.info(f"source is pumbed, {doc_info.get('PMID', '')}")
+                valid_pmid = [one["pmid"] for one in doc_info.get("references", [])]
                 already_info,valid_pmid = get_info_from_local(valid_pmid)
                 pmid_info_lst = fetch_pubmed_json(valid_pmid)
                 doc_info["references"] = already_info+pmid_info_lst
 
-            elif "referenceWorksOpenAlex" in doc["info"]:
+            elif "referenceWorksOpenAlex" in doc_info:
                 references = search_doc_via_url_from_openalex(
                     doc_info["referenceWorksOpenAlex"]
                 )

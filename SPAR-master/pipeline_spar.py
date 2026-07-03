@@ -12,7 +12,7 @@ from graphviz import Digraph
 from instruction import *
 from local_db_v2 import db_path, ArxivDatabase
 from log import logger
-from search_engine import AcademicTreeSearchEngine
+from search_engine import AcademicTreeSearchEngine,llm_relevance_score
 from search_node import SearchNode
 from typing import List, Dict, Optional
 import json
@@ -241,22 +241,26 @@ class AcademicSearchTree:
                 sources = expanded_info["suitable_sources"]
                 logger.info(f"Using suitable sources from query expansion: {sources}")
             else:
-                sources = SEARCH_ROUTE
+                sources = SEARCH_ROUTES
                 logger.info(
                     f"No suitable_sources found in expanded_queries_info, using default: {sources}"
                 )
         else:
             # Use default sources based on depth
-            sources = SEARCH_ROUTE if current_depth == 1 else ["arxiv"]
+            sources = SEARCH_ROUTES if current_depth == 1 else ["arxiv"]
             logger.info(f"Using depth-based sources: {sources}")
 
         if "arxiv" not in sources:
             sources.insert(0, "arxiv")
             logger.info(f"Adding 'arxiv' to sources: {sources}")
 
-        if current_depth > 1:
-            logger.info(f"current_depth: {current_depth}, only search arxiv")
-            sources = ["arxiv"]
+        #f current_depth > 1:  #wsl-72去除限制
+        logger.info(f"current_depth: {current_depth}, only search arxiv")
+        sources = ["arxiv"]
+
+        if "openalex" not in sources: #wsl-72搜索包含openalex
+            sources.append("openalex")
+            logger.info("Forced adding openalex to sources")
 
         try:
             # Execute batch search across multiple sources
@@ -790,6 +794,32 @@ class AcademicSearchTree:
             logger.info(
                 f"Found {high_rel_count} highly relevant documents (score > {self.high_score_thresh})"
             )
+
+            # wsl-73二次筛选
+            if ENABLE_LLM_RERANK:  # 需要先在 global_config 中定义这个开关
+                logger.info("Applying LLM fine-grained filtering...")
+                filtered_docs = {}
+                for doc_id, doc in self.root.searched_docs.items():
+                    # 调用 LLM 评分
+                    llm_score = llm_relevance_score(self.user_query, doc)
+                    doc['llm_score'] = llm_score  # 记录用于调试
+                    if llm_score >= LLM_RERANK_THRESHOLD:
+                        filtered_docs[doc_id] = doc
+                    else:
+                        logger.debug(f"Filtered doc {doc_id} with LLM score {llm_score:.2f}")
+                self.root.searched_docs = filtered_docs
+                logger.info(f"After LLM filter: {len(filtered_docs)} documents kept")
+
+            # wsl-73
+            if RERANK:
+                logger.info("Reranking final document list")
+                reranked_docs = self.reranker.rerank_query_and_doc_list(
+                    self.root.searched_docs, self.user_query
+                )
+                # 替换为重排序后的结果
+                self.root.reranked_top_docs = reranked_docs
+                # 然后用重排序后的文档替换 searched_docs（或保留为独立字段）
+                # 例如：self.root.searched_docs = reranked_docs
 
             return self._collect_results()
 

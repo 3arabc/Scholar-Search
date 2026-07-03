@@ -13,7 +13,7 @@ from global_config import RERANK_MODEL
 from typing import List, Dict, Union
 import json
 import os
-
+from log import logger #wsl-71
 
 class Reranker(object):
     def rerank_query_and_doc_list(self,all_docs,user_query,score_name="sim_score"):
@@ -126,11 +126,17 @@ class Reranker(object):
 
             if time_constraints["specific_timeframe"]:
                 prompt += f"   - The query asks for papers {time_constraints['specific_timeframe']}, so prefer papers within this timeframe\n"
-        else:
-            prompt += "   - Generally prefer more recent papers, but don't overly penalize influential older papers\n"
+        #else:
+        #    prompt += "   - Generally prefer more recent papers, but don't overly penalize influential older papers\n"
+        else:  #wsl改-时效性
+            prompt += "   - Since this is an academic literature search, strongly favor papers published in the last 3 years unless an older paper is exceptionally foundational (e.g., cited > 5000 times).\n"
+
 
         prompt += (
-            "3. Maintain reasonable relevance to the original query\n\n"
+            "3. Reproducibility & Open Science:\n" #wsl改-复现性
+            "   - Strongly prefer papers that provide open-source code, publicly available datasets, or detailed experimental setups.\n"
+            "   - If a paper lacks code or data, penalize it unless it is a purely theoretical breakthrough.\n"
+            "4. Maintain reasonable relevance to the original query\n\n"
             "For each paper, provide:\n"
             "1. A new numerical rank (1 being the highest)\n"
             "2. A brief justification (1-2 sentences)\n"
@@ -163,8 +169,8 @@ class Reranker(object):
         prompt += "Please provide your reranking with new scores and concise justifications in the following format for each document:\n"
         prompt += "Document [index]: [score] - [justification]\n"
         prompt += "For example:\n"
-        prompt += "Document 1: 9.5 - Highly relevant as it directly addresses the query topic with empirical evidence.\n"
-        prompt += "Document 2: 7.0 - Somewhat relevant but focuses on a tangential aspect of the query.\n"
+        prompt += "Document 1: 0.95 - Highly relevant as it directly addresses the query topic with empirical evidence.\n" #wsl
+        prompt += "Document 2: 0.70 - Somewhat relevant but focuses on a tangential aspect of the query.\n"
 
         return prompt
 
@@ -237,8 +243,8 @@ class Reranker(object):
                     "rerank_score": score,
                     "justification": justification
                 }
-
-        return [r for r in results if r]  #
+        # return [r for r in results if r]  #wsl-bug
+        return results
 
 
     def _update_documents_with_reranking(self, reranked_results, original_docs):
@@ -253,6 +259,8 @@ class Reranker(object):
         updates_applied = 0
         reraked_docs = []
         for idx, result in enumerate(reranked_results):
+            if not result:  #wsl-bug 如果解析结果为空，保留原始分数不变
+                continue
             if idx < len(original_docs):
                 # Get reranking information
                 rerank_score = result.get("rerank_score")
@@ -277,6 +285,12 @@ class Reranker(object):
         logger.info(f"Applied reranking updates to {updates_applied} documents")
 
         return reraked_docs
+    def _update_documents_with_reranking(self, reranked_results, original_docs):  #wsl-返回完整的字段用于node排序
+        for idx, result in enumerate(reranked_results):
+            if idx < len(original_docs) and result:
+                original_docs[idx]["rerank_score"] = result.get("rerank_score")
+                original_docs[idx]["rerank_justification"] = result.get("justification", "")
+        return original_docs  # 返回包含所有原始字段的完整列表
 def keep_letters(s):
     letters = [c for c in s if c.isalpha()]
     result = "".join(letters)

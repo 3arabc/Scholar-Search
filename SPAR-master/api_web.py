@@ -539,7 +539,7 @@ def search_doc_via_url_from_openalex(data):
 
 
 def search_paper_via_query_from_openalex(
-    keyword, page=1, per_page=10, search_reference=False
+    keyword, page=1, per_page=50, search_reference=False
 ):
     """从openalex获取相关论文，要输入关键词，不支持自然语言的输入，效果不好"""
     try:
