@@ -579,7 +579,8 @@ def _generate_query_from_reference(
             if query_list is None:
                 logger.warning("Failed to parse JSON, using defaults")
                 # 使用默认值或重试
-                query_list = json.loads(response)
+                #query_list = json.loads(response)
+                return None
             output = []
             for new_query in query_list:
                 if new_query == "":
@@ -626,7 +627,8 @@ def similarity_code_v4(query, doc, search_time):
         if response_new is None:
             logger.warning("Failed to parse JSON, using defaults")
             # 使用默认值或重试
-            response = json.loads(response.strip())
+            #response = json.loads(response.strip())
+            return None
         else:
             response = response_new
         overall_score = [
@@ -644,6 +646,48 @@ def similarity_code_v4(query, doc, search_time):
         logger.error(f"similarity_code_v4 error {traceback.format_exc()}")
         return {}
 
+def llm_relevance_score(query: str, doc: Dict) -> float:  #wsl-73 二次筛选
+    """
+    使用 LLM 对单篇论文进行相关性评分，返回 0-1 之间的分数。
+    采用更严格的评价标准，包括：
+        - 标题与查询的匹配度
+        - 摘要内容是否直接回答/相关
+        - 研究领域是否匹配
+        - 是否为综述性或技术性文章（根据查询意图）
+    """
+    prompt = f"""你是一位学术研究助手，需要评估以下论文与用户查询的相关性。
+
+用户查询：{query}
+
+论文信息：
+标题：{doc.get('title', '')}
+摘要：{doc.get('abstract', '')}
+领域：{doc.get('fieldsOfStudy', '')}
+
+请从以下维度对论文进行评分（0-1分，精确到小数点后2位）：
+1. 主题匹配度（标题是否直接相关）
+2. 内容深度（摘要是否覆盖查询核心问题）
+3. 研究领域的一致性
+4. 论文类型（如综述、实验、理论）是否符合需求
+
+请仅输出一个分数（如 0.85），不要有任何其他文字。
+"""
+    for attempt in range(LLM_TRY_COUNT):
+        try:
+            response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
+            # 提取分数（支持多种格式）
+            match = re.search(r'(\d+\.\d+|\d+)', response.strip())
+            if match:
+                score = float(match.group(1))
+                # 确保在 0-1 范围内
+                return max(0.0, min(1.0, score))
+            else:
+                logger.warning(f"LLM returned no numeric score: {response}")
+        except Exception as e:
+            logger.error(f"LLM relevance scoring failed: {e}")
+            time.sleep(SLEEP_TIME_LLM)
+    # 如果多次失败，返回原始 sim_score（fallback）
+    return doc.get('sim_score', 0.0)
 
 def similarity_code_v5(query, doc):
     output = {}
@@ -737,7 +781,8 @@ class AcademicTreeSearchEngine:
                 if response_new is None:
                     logger.warning("Failed to parse JSON, using defaults")
                     # 使用默认值或重试
-                    response_new = json.loads(response)
+                    #response_new = json.loads(response)
+                    return None
                 try:
                     judge_info["expanded_queries_info"]["expanded_queries"] = response_new
                     return judge_info
@@ -857,7 +902,8 @@ class AcademicTreeSearchEngine:
                     if result is None:
                         logger.warning("Failed to parse JSON, using defaults")
                         # 使用默认值或重试
-                        result = json.loads(response)
+                        #result = json.loads(response)
+                        return None
 
                     # Validate the response has required fields
                     if all(
@@ -901,7 +947,8 @@ class AcademicTreeSearchEngine:
                     if result is None:
                         logger.warning("Failed to parse JSON, using defaults")
                         # 使用默认值或重试
-                        result = json.loads(response)
+                        #result = json.loads(response)
+                        return None
 
                     # Validate the response has required fields
                     if "needs_expansion" in result and "reason" in result:
@@ -1005,7 +1052,8 @@ class AcademicTreeSearchEngine:
                         if parsed_response is None:
                             logger.warning("Failed to parse JSON, using defaults")
                             # 使用默认值或重试
-                            parsed_response = json.loads(response)
+                            #parsed_response = json.loads(response)
+                            return None
                     except json.JSONDecodeError as e:
                         logger.warning(f"Failed to parse JSON response: {str(e)}")
                         # Attempt to extract JSON from text if standard parsing fails
@@ -1016,7 +1064,8 @@ class AcademicTreeSearchEngine:
                                 if parsed_response is None:
                                     logger.warning("Failed to parse JSON, using defaults")
                                     # 使用默认值或重试
-                                    parsed_response = json.loads(match.group(0))
+                                    #parsed_response = json.loads(match.group(0))
+                                    return None
                             except:
                                 logger.warning("Failed to extract JSON from response")
                                 continue
@@ -1029,7 +1078,8 @@ class AcademicTreeSearchEngine:
                                     if parsed_response is None:
                                         logger.warning("Failed to parse JSON, using defaults")
                                         # 使用默认值或重试
-                                        parsed_response = json.loads(match.group(0))
+                                        #parsed_response = json.loads(match.group(0))
+                                        return None
                                 except:
                                     logger.warning(
                                         "Failed to extract JSON list from response"

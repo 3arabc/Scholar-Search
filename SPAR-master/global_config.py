@@ -28,6 +28,11 @@ DEPLOYMENT_NAME = "Qwen3-8B"
 # =============================================================================
 # PIPELINE CONFIGURATION
 # =============================================================================
+
+# wsl-73精准过滤配置
+ENABLE_LLM_RERANK = True        # 是否启用 LLM 二次过滤
+LLM_RERANK_THRESHOLD = 0.7      # 保留分数阈值
+
 SAVE_ID2DOCS = True
 RELEVANCE_SCORE = 0.5
 WEB_RETRY_NUM = 2 #wsl-71
@@ -94,6 +99,7 @@ S2_API_KEY = os.getenv("S2_API_KEY", None)
 # =============================================================================
 DO_REFERENCE_SEARCH = False  # Toggle reference-based search
 RERANK =os.getenv("DO_RERANK",True)
+RERANK = True #wsl-73
 
 KEY_WORDS_NUM =2
 LLM_PARREL_NUM=2
