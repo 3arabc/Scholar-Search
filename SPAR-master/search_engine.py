@@ -988,7 +988,7 @@ class AcademicTreeSearchEngine:
                 logger.info(f"Using survey-focused expansion for query: {query}")
                 prompt = template_query_fusion_survery_forcus.format(
                     user_query=query,
-                    user_input_N=5,
+                    user_input_N=3, #wsl-74
                     current_year=current_year,
                     previous_year=previous_year,
                 )
@@ -1102,6 +1102,7 @@ class AcademicTreeSearchEngine:
                         f"LLM expansion failed (attempt {attempt+1}): {str(e)}"
                     )
                     time.sleep(SLEEP_TIME_LLM)
+                    continue  #wsl-74 继续下一次尝试
 
             # If we tried all attempts but still have a valid best response, return it
             if best_response and len(best_response) > 0:
@@ -1558,7 +1559,22 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
 
         return scorted_docs
 
-    def calculate_similarity(
+    def calculate_similarity(  #wsl-74相似度计算改为bge
+            self, query, docs, search_time="", score_thresh=0.5, source=""
+    ):
+        """
+        使用 BGE 向量相似度替代 LLM 打分，大幅提升速度。
+        """
+        logger.info(f"calculate_similarity (BGE) for {len(docs)} docs, query: {query[:50]}...")
+        # 直接调用已有的 BGE 方法，保持参数兼容
+        return self.calculate_sim_bge(
+            query=query,
+            docs=docs,
+            search_time=search_time,  # calculate_sim_bge 也有该参数，但实际未使用
+            score_thresh=score_thresh,
+            source=source
+        )
+    '''def calculate_similarity(
         self, query, docs, search_time="", score_thresh=0.5, source=""
     ):
         logger.debug(f"calculate_similarity, query: {query}; doc is: {docs[0].keys()}")
@@ -1601,6 +1617,7 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
                         irrelevace_docs.append(simple_info)
 
         return relevace_docs, irrelevace_docs
+        '''
 
     def get_doc_references(self, doc_info):
         try:

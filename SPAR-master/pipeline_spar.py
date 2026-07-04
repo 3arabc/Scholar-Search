@@ -54,6 +54,8 @@ class AcademicSearchTree:
         max_docs: int = 50,
         similarity_threshold: float = 0.6,
         search_engine=None,
+        enable_llm_rerank=True,  # wsl-73 二次筛选
+        llm_threshold=0.7
     ):
         # Search parameters
         self.max_depth = max_depth
@@ -67,6 +69,8 @@ class AcademicSearchTree:
         self.high_score_thresh = 0.75
         self.search_engine = AcademicTreeSearchEngine()
         self.reranker = Reranker()
+        self.enable_llm_rerank = enable_llm_rerank  # wsl-73 二次筛选
+        self.llm_threshold = llm_threshold
 
     def _cleanup_resources(self):
         """Perform cleanup of resources after search is completed"""
@@ -696,7 +700,7 @@ class AcademicSearchTree:
         self.search_date = ""
 
         # Initialize search tree
-        logger.info("🌲 Initializing academic search tree")
+        logger.info(" Initializing academic search tree")
         self.root = SearchNode(
             query_str=initial_query,
             status="INIT",
