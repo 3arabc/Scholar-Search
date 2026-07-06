@@ -17,13 +17,13 @@ DEBUG = False
 # =============================================================================
 API_KEY = os.getenv(
     "OPENAI_API_KEY",
-    "your_openai_api_key_here",
+    "ollama",
 )
 ENDPOINT = os.getenv(
     "OPENAI_ENDPOINT",
-    "https://api.openai.com/v1",
+    "http://localhost:11434/v1",
 )
-DEPLOYMENT_NAME = "gpt-4o"
+DEPLOYMENT_NAME = os.getenv("OPENAI_MODEL", "qwen3:4b")
 
 # =============================================================================
 # PIPELINE CONFIGURATION
@@ -48,7 +48,7 @@ LENGTH_GEN_QUERY_FROM_CITATION = 12288
 TRY_COUNT = 4
 LLM_TRY_COUNT = 4
 LLM_PARALLEL_NUM = 4
-LLM_MODEL_NAME = "Qwen3-8B"
+LLM_MODEL_NAME = DEPLOYMENT_NAME
 
 
 API_TRY_COUNT = 4
@@ -100,10 +100,16 @@ LLM_PARREL_NUM=2
 # =============================================================================
 # NETWORK CONFIGURATION
 # =============================================================================
-PROXIES: Dict[str, str] = {
-    "http": os.getenv("HTTP_PROXY", "http://localhost:1080"),
-    "https": os.getenv("HTTPS_PROXY", "http://localhost:1080")
-}
+HTTP_PROXY = os.getenv("HTTP_PROXY")
+HTTPS_PROXY = os.getenv("HTTPS_PROXY")
+PROXIES = (
+    {
+        "http": HTTP_PROXY,
+        "https": HTTPS_PROXY,
+    }
+    if HTTP_PROXY or HTTPS_PROXY
+    else None
+)
 
 # ArXiv client configuration
 ARXIV_CLIENT = arxiv.Client(delay_seconds=0.05)
@@ -112,7 +118,7 @@ ARXIV_CLIENT = arxiv.Client(delay_seconds=0.05)
 # RERANKING CONFIGURATION
 # =============================================================================
 ENABLE_RERANK = False
-RERANK_MODEL = "Qwen3-8B"
+RERANK_MODEL = DEPLOYMENT_NAME
 
 # =============================================================================
 # CONFIGURATION VALIDATION

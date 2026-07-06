@@ -20,6 +20,7 @@ from api_web import (
     get_doc_info_from_api,
     search_paper_from_arxiv_by_arxiv_id,
     parallel_search_search_paper_from_arxiv,
+    search_paper_via_query_from_arxiv,
     search_paper_via_query_from_openalex,
     search_paper_via_query_from_semantic,
     search_doc_via_url_from_openalex,
@@ -161,6 +162,19 @@ class MultiSearchAgent:
                         paper_info = id2docs[arxiv_id]
                         merged_papers[arxiv_id] = paper_info
                         query2docs[query].append(paper_info)
+
+            if not merged_papers:
+                logger.info(
+                    "Serper arXiv search returned no papers, falling back to direct arXiv API"
+                )
+                for query in queries:
+                    direct_papers = search_paper_via_query_from_arxiv(
+                        query, max_results=15
+                    )
+                    for paper_id, paper_info in direct_papers.items():
+                        if paper_id not in searched_docs:
+                            merged_papers[paper_id] = paper_info
+                            query2docs[query].append(paper_info)
         except:
             logger.error(f"google search error: {traceback.format_exc()}")
         finally:
@@ -895,7 +909,7 @@ class AcademicTreeSearchEngine:
             previous_year = current_year - 1
 
             # Determine the appropriate template based on query analysis
-            if FUSION_TEMP == "AUTOMATIC" and  self._is_survey_focused(intent):
+            if FUSION_TEMPLATE == "AUTOMATIC" and  self._is_survey_focused(intent):
                 # For survey-focused queries, prioritize finding comprehensive reviews
                 logger.info(f"Using survey-focused expansion for query: {query}")
                 prompt = template_query_fusion_survery_forcus.format(
@@ -905,7 +919,7 @@ class AcademicTreeSearchEngine:
                     previous_year=previous_year,
                 )
                 prompt_type = "survey"
-            elif FUSION_TEMP == "AUTOMATIC" and self._is_complex_domain(domain):
+            elif FUSION_TEMPLATE == "AUTOMATIC" and self._is_complex_domain(domain):
                 # For queries in complex or specialized domains, use domain-aware expansion
                 logger.info(f"Using domain-aware expansion for query in {domain}")
                 prompt = template_domain_aware_query_expansion.format(
@@ -917,12 +931,12 @@ class AcademicTreeSearchEngine:
                     previous_year=previous_year,
                 )
                 prompt_type = "domain"
-            elif FUSION_TEMP == "PASA":
+            elif FUSION_TEMPLATE == "PASA":
                 # Use PASA template if explicitly configured
                 logger.info(f"Using PASA template for query expansion")
                 prompt = template_query_fusion_pasa.format(user_query=query)
                 prompt_type = "pasa"
-            elif FUSION_TEMP == "WITHEXPLAIN":
+            elif FUSION_TEMPLATE == "WITHEXPLAIN":
                 # Use withexplain template if explicitly configured
                 logger.info(f"Using withexplain for query: {query}")
                 prompt = (

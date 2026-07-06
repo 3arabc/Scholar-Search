@@ -806,7 +806,9 @@ def google_search_arxiv_id(query, try_num=4, num=10, end_date=""):
     )
 
     GOOGLE_SERPER_KEY = os.getenv("GOOGLE_SERPER_KEY", "xxx")
-    logger.info(f"use GOOGLE_SERPER_KEY: {GOOGLE_SERPER_KEY}")
+    logger.info(
+        f"use GOOGLE_SERPER_KEY: {'set' if GOOGLE_SERPER_KEY and GOOGLE_SERPER_KEY != 'xxx' else 'unset'}"
+    )
     headers = {"X-API-KEY": GOOGLE_SERPER_KEY, "Content-Type": "application/json"}
     assert headers["X-API-KEY"] != "your google keys", "add your google search key!!!"
 
@@ -829,13 +831,47 @@ def google_search_arxiv_id(query, try_num=4, num=10, end_date=""):
                 logger.info(f"google_search_arxiv_id success: {len(res)}")
                 return res
             else:
-                logger.error(f"google_search_arxiv_id response: {response}")
+                logger.error(
+                    f"google_search_arxiv_id response: {response.status_code}, {response.text[:500]}"
+                )
         except:
             logger.error(
                 f"google search failed, query: {query}; Error: {traceback.format_exc()}"
             )
             continue
     return []
+
+
+def search_paper_via_query_from_arxiv(query, max_results=10):
+    """Search papers directly from the arXiv API by query."""
+    try:
+        search = arxiv.Search(
+            query=query.strip(),
+            max_results=max_results,
+            sort_by=arxiv.SortCriterion.Relevance,
+            sort_order=arxiv.SortOrder.Descending,
+        )
+        papers = {}
+        for paper in ARXIV_CLIENT.results(search):
+            arxiv_id = paper.entry_id.split("/")[-1].split("v")[0]
+            papers[arxiv_id] = {
+                "paper_id": arxiv_id,
+                "arxivId": arxiv_id,
+                "arxivUrl": paper.entry_id,
+                "title": paper.title.replace("\n", " "),
+                "abstract": paper.summary.replace("\n", " "),
+                "authors": [{"name": author.name} for author in paper.authors],
+                "publicationYear": paper.published.strftime("%Y%m%d"),
+                "fieldsOfStudy": ";".join(category for category in paper.categories),
+                "source": "Search From Arxiv Direct",
+            }
+        logger.info(f"direct arxiv search success: {query}, {len(papers)} papers")
+        return papers
+    except:
+        logger.error(
+            f"direct arxiv search failed: {query}; Error: {traceback.format_exc()}"
+        )
+        return {}
 
 
 def get_doc_info_from_semantic_scholar_by_arxivid(

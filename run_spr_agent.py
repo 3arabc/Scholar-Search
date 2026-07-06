@@ -15,10 +15,10 @@ import traceback
 import random
 from global_config import (
     LLM_MODEL_NAME,
-    DO_REFERENCE_
+    DO_REFERENCE_SEARCH,
     DO_FUSION_JUDGE,
-    FUSION_TEMP,
-    SEARCH_ROUTE,
+    FUSION_TEMPLATE,
+    SEARCH_ROUTES,
 )
 import sys
 import glob
@@ -62,7 +62,7 @@ select_file = benchmark_map[benchmark_name]["select_file"]
 print(f"select_file: {select_file}")
 
 
-output_folder = f"./gen_result/{benchmark_name}_{sample_num}_msearch_{'-'.join(SEARCH_ROUTE)}_depth{max_depth}_do_reference_{DO_REFERENCE_SEARCH}_query_judge_{DO_FUSION_JUDGE}_fusion_{FUSION_TEMP}_no_enddate_no_autocorrect_pasa_score_{score_thresh}"  # 加上query fusion
+output_folder = f"./gen_result/{benchmark_name}_{sample_num}_msearch_{'-'.join(SEARCH_ROUTES)}_depth{max_depth}_do_reference_{DO_REFERENCE_SEARCH}_query_judge_{DO_FUSION_JUDGE}_fusion_{FUSION_TEMPLATE}_no_enddate_no_autocorrect_pasa_score_{score_thresh}"  # 加上query fusion
 
 print(f"output_folder: {output_folder}")
 

@@ -17,6 +17,7 @@ from cachetools import TTLCache, cachedmethod
 import operator
 from cachetools.keys import hashkey
 from openai import OpenAI
+from global_config import API_KEY, ENDPOINT, DEPLOYMENT_NAME
 
 try:
     from log import logger
@@ -46,6 +47,20 @@ class ModelConfig:
 # Model configurations
 # buid your model locally, and set the url
 MODEL_CONFIGS = {
+    DEPLOYMENT_NAME: ModelConfig(
+        url=ENDPOINT,
+        max_len=8192,
+        model_name=DEPLOYMENT_NAME,
+        think_bool=False,
+        temperature=0.7,
+        top_p=0.8,
+        retry_attempts=4,
+        timeout=120,
+        openai_client=OpenAI(
+            api_key=API_KEY,
+            base_url=ENDPOINT,
+        ),
+    ),
 
     "llama3-70b": ModelConfig(
         url="http://0.0.0.0:9087/v1/chat/completions",
@@ -138,7 +153,7 @@ class LLMClient:
     ) -> Optional[str]:
         """Make HTTP request with caching"""
         try:
-            if "Qwen3" in data["model"]:  # 判断是否使用 Qwen3-32B 模型
+            if MODEL_CONFIGS[data["model"]].openai_client is not None:
                 return self._make_qwen3_request(data)
             else:
                 response = self.session.post(url, json=data, timeout=timeout)
@@ -158,16 +173,10 @@ class LLMClient:
                 messages=data["messages"],
                 temperature=data.get("temperature", 0.7),
                 top_p=data.get("top_p", 0.8),
-                presence_penalty=1.5,
-                extra_body={
-                    "chat_template_kwargs": {
-                        "enable_thinking": data.get("think_bool", False),
-                    },
-                    "top_k": data.get("top_k", 20),  # Added to extra_body
-                    "min_p": data.get("min_p", 0),  # Added to extra_body
-                },  # Disable thinking mode
+                max_tokens=data.get("max_tokens", MODEL_CONFIGS[data["model"]].max_len),
             )
-            msg = chat_response.choices[0].message.reasoning_content
+            message = chat_response.choices[0].message
+            msg = getattr(message, "content", None) or getattr(message, "reasoning_content", None)
             if msg:
                 if "</think>" in msg:
                     msg = msg.split("</think>")[-1]

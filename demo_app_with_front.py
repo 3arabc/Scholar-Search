@@ -15,7 +15,12 @@ import sys
 import os
 import traceback
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # 添加项目路径
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
 from pipeline_spar import AcademicSearchTree
 from search_engine import MultiSearchAgent
 
@@ -51,7 +56,7 @@ multi_search_agent = MultiSearchAgent()
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     """返回前端页面"""
-    html_file = "./index.html"
+    html_file = os.path.join(BASE_DIR, "index.html")
     try:
         with open(html_file, 'r', encoding='utf-8') as f:
             return HTMLResponse(content=f.read())
@@ -485,11 +490,11 @@ async def get_search_modes():
 
 if __name__ == "__main__":
     # 创建templates目录
-    templates_dir = "./api/templates"
+    templates_dir = os.path.join(BASE_DIR, "api", "templates")
     os.makedirs(templates_dir, exist_ok=True)
 
     uvicorn.run(
-        "demo_app_with_front:app",
+        app,
         host="0.0.0.0",
         port=8000,
         reload=False,
