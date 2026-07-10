@@ -79,12 +79,13 @@ class MultiSearchAgent:
         for _ in range(4):
             try:
                 response = get_from_llm(model_inp, model_name=LLM_MODEL_NAME)
-                pattern = r"\[Start\](.*?)\[End\]"
-                match = re.search(pattern, response)
-                if match:
-                    keywords = match.group(1).strip()
-                    logger.info(f"Extracted keywords for {source}: {keywords}")
-                    return [kw.strip() for kw in keywords.split(",") if kw.strip()][:KEY_WORDS_NUM]
+                if response:
+                    pattern = r"\[Start\](.*?)\[End\]"
+                    match = re.search(pattern, response)
+                    if match:
+                        keywords = match.group(1).strip()
+                        logger.info(f"Extracted keywords for {source}: {keywords}")
+                        return [kw.strip() for kw in keywords.split(",") if kw.strip()][:KEY_WORDS_NUM]
             except:
                 logger.error(f"Failed to extract keywords: {traceback.format_exc()}")
         return []
@@ -95,88 +96,142 @@ class MultiSearchAgent:
         end_date: str = "",
         searched_docs: Dict[str, Any] = None,
     ) -> SearchResult:
-        """Execute Google Scholar search for a list of queries."""
+        """Execute Google Scholar search with automatic direct ArXiv fallback."""
         try:
-
             if searched_docs is None:
                 searched_docs = {}
 
-            # 如果 end_date 为空，使用当前日期
-
-            # if not end_date:
-            #     end_date = self.current_date
-
-            # Step 1: 并行搜索 arxiv_ids
             merged_papers = {}
             query2docs = {query: [] for query in queries}
-
             results = {}
-            with concurrent.futures.ThreadPoolExecutor(
-                max_workers=self.max_workers
-            ) as executor:
-                future_to_query = {
-                    executor.submit(
-                        google_search_arxiv_id, query, API_TRY_COUNT, 15, end_date
-                    ): query
-                    for query in queries
-                }
-                for future in concurrent.futures.as_completed(future_to_query):
-                    query = future_to_query[future]
-                    try:
-                        results[query] = future.result(timeout=2)
-                    except Exception as e:
-                        logger.error(
-                            f"Google search failed for query {query}: {str(e)}"
-                        )
-                        results[query] = []
 
-            logger.info(f"google_search_arxiv_id results: {results}")
+            # ==========================================
+            # 第一层：尝试进行原版 Google Serper 搜索
+            # ==========================================
+            google_success = False
+            try:
+                # 检查 serper key 是否有效（不为默认的 xxx 或 your google keys 等）
+                from global_config import GOOGLE_SERPER_KEY
+                effective_key = os.getenv("GOOGLE_SERPER_KEY", GOOGLE_SERPER_KEY)
+                if effective_key and effective_key not in ["xxx", "your google keys", "your_serper_key_here"]:
+                    logger.info(f"Attempting Google Serper search for queries using key: {effective_key[:4]}...{effective_key[-4:] if len(effective_key) > 8 else ''}")
+                    with concurrent.futures.ThreadPoolExecutor(
+                        max_workers=self.max_workers
+                    ) as executor:
+                        future_to_query = {
+                            executor.submit(
+                                google_search_arxiv_id, query, API_TRY_COUNT, 15, end_date
+                            ): query
+                            for query in queries
+                        }
+                        for future in concurrent.futures.as_completed(future_to_query):
+                            query = future_to_query[future]
+                            try:
+                                results[query] = future.result(timeout=5)
+                            except Exception as e:
+                                logger.error(f"Google search failed for query {query}: {str(e)}")
+                                results[query] = []
+                    
+                    # 如果至少搜出了一些 ID，判定为成功
+                    if any(results.values()):
+                        google_success = True
+                        logger.info("Google Serper search succeeded.")
+                else:
+                    logger.info("No valid Google Serper Key detected, skipping to direct ArXiv fallback.")
+            except Exception as e:
+                logger.error(f"Google Serper search encountered error: {str(e)}, falling back to direct ArXiv search...")
 
-            # Step 2: 去重 arxiv_ids
-            unique_arxiv: Set[str] = set()
-            original_arxiv = []
-            for arxiv_ids in results.values():
-                original_arxiv.extend(arxiv_ids)
-                for arxiv_id in arxiv_ids:
-                    if arxiv_id not in searched_docs:
-                        unique_arxiv.add(arxiv_id)
-
-            logger.info(
-                f"Original num: {len(original_arxiv)}, Unique num: {len(unique_arxiv)}"
-            )
-
-            # Step 3: 统一获取论文详情
-            id2docs = {}
-            if unique_arxiv:
-                id2docs = parallel_search_search_paper_from_arxiv(
-                    list(unique_arxiv),
-                    max_workers=self.max_workers,
-                    batch_size=self.batch_size,
-                )
-
-            # Step 4: 合并结果
-
-            for query, arxiv_ids in results.items():
-                for arxiv_id in arxiv_ids:
-                    if arxiv_id in id2docs:
-                        paper_info = id2docs[arxiv_id]
-                        merged_papers[arxiv_id] = paper_info
-                        query2docs[query].append(paper_info)
-
-            if not merged_papers:
-                logger.info(
-                    "Serper arXiv search returned no papers, falling back to direct arXiv API"
-                )
-                for query in queries:
-                    direct_papers = search_paper_via_query_from_arxiv(
-                        query, max_results=15
+            # ==========================================
+            # 第二层：如果 Google 失败或未配置 Key，降级使用 ArXiv 关键词直连
+            # ==========================================
+            if google_success:
+                # 1. 去重并合并从 Google Serper 捞出的 ArXiv IDs
+                unique_arxiv = set()
+                for arxiv_ids in results.values():
+                    for arxiv_id in arxiv_ids:
+                        if arxiv_id not in searched_docs:
+                            unique_arxiv.add(arxiv_id)
+                
+                # 2. 批量获取详细文档信息
+                id2docs = {}
+                if unique_arxiv:
+                    id2docs = parallel_search_search_paper_from_arxiv(
+                        list(unique_arxiv),
+                        max_workers=self.max_workers,
+                        batch_size=self.batch_size,
                     )
-                    for paper_id, paper_info in direct_papers.items():
-                        if paper_id not in searched_docs:
-                            merged_papers[paper_id] = paper_info
+                
+                # 3. 组装结果
+                for query, arxiv_ids in results.items():
+                    for arxiv_id in arxiv_ids:
+                        if arxiv_id in id2docs:
+                            paper_info = id2docs[arxiv_id]
+                            merged_papers[arxiv_id] = paper_info
                             query2docs[query].append(paper_info)
-        except:
-            logger.error(f"google search error: {traceback.format_exc()}")
+                        elif arxiv_id in searched_docs:
+                            paper_info = searched_docs[arxiv_id]
+                            merged_papers[arxiv_id] = paper_info
+                            query2docs[query].append(paper_info)
+            else:
+                # 使用直连 arXiv 并带关键词净化的方案
+                logger.info("Executing fallback: direct ArXiv keyword search...")
+                for query in queries:
+                    try:
+                        # 提炼学术关键词以适配 arXiv API 的 Boolean 精确匹配机制
+                        try:
+                            keywords = self.extract_keywords(query, "arxiv")
+                            if keywords:
+                                clean_kws = []
+                                for kw in keywords:
+                                    if " " in kw and not (kw.startswith('"') or kw.startswith("'")):
+                                        clean_kws.append(f'"{kw}"')
+                                    else:
+                                        clean_kws.append(kw)
+                                search_query = " ".join(clean_kws)
+                                logger.info(f"Direct ArXiv search fallback with keywords: '{search_query}' (original: '{query}')")
+                            else:
+                                search_query = query
+                                logger.info(f"Direct ArXiv search fallback for query: '{search_query}'")
+                        except Exception as e:
+                            logger.error(f"Keyword extraction failed for ArXiv fallback: {str(e)}")
+                            search_query = query
+                            logger.info(f"Direct ArXiv search fallback for query: '{search_query}'")
+
+                        import arxiv
+                        search = arxiv.Search(
+                            query=search_query,
+                            max_results=15,
+                            sort_by=arxiv.SortCriterion.Relevance,
+                            sort_order=arxiv.SortOrder.Descending
+                        )
+                        results_arxiv = list(ARXIV_CLIENT.results(search))
+                        for paper in results_arxiv:
+                            arxiv_id = paper.entry_id.split("/")[-1].split("v")[0]
+                            if arxiv_id in searched_docs:
+                                paper_info = searched_docs[arxiv_id]
+                                merged_papers[arxiv_id] = paper_info
+                                query2docs[query].append(paper_info)
+                                continue
+                            paper_info = {
+                                "paper_id": arxiv_id,
+                                "arxivId": arxiv_id,
+                                "arxivUrl": paper.entry_id,
+                                "title": paper.title.replace("\n", " "),
+                                "abstract": paper.summary.replace("\n", " "),
+                                "authors": [{"name": author.name} for author in paper.authors],
+                                "publicationYear": paper.published.strftime("%Y"),
+                                "year": paper.published.strftime("%Y%m%d"),
+                                "fieldsOfStudy": ";".join(one for one in paper.categories),
+                                "source": "Search From Arxiv Fallback",
+                                "sources": ["arxiv"]
+                            }
+                            merged_papers[arxiv_id] = paper_info
+                            query2docs[query].append(paper_info)
+                    except Exception as ex:
+                        logger.error(f"Direct ArXiv search fallback failed for query '{query}': {str(ex)}")
+
+        except Exception as e:
+            logger.error(f"Overall _google_arxiv_search error: {traceback.format_exc()}")
         finally:
             return SearchResult(
                 source="arxiv", papers=merged_papers, query2paper=query2docs
@@ -603,7 +658,7 @@ def similarity_code_v4(query, doc, search_time):
                 publicationYear=doc["publicationYear"] if doc["publicationYear"] is not None else "",
             )
             + template_sim_between_query_doc_v2_example
-        )
+        ) + "\n\nCRITICAL: Keep your 'justification' explanation under 40 words. Output ONLY the JSON block."
         response = get_from_llm(model_inp, model_name=LLM_MODEL_NAME)
         response = fetch_string(response)
         response = json.loads(response.strip())
@@ -648,8 +703,8 @@ def _calculate_similarity_with_retry(
     query: str,
     search_time: str,
     doc: Dict,
-    max_retries: int = LLM_TRY_COUNT,
-    timeout: int = 20,
+    max_retries: int = 2,
+    timeout: int = 1,
 ) -> float:
     """计算 query 与文档的相关性，带重试和超时"""
     output = {}
@@ -666,7 +721,7 @@ def _calculate_similarity_with_retry(
             logger.error(
                 f"Similarity calculation failed for '{doc['title']}', attempt {attempt+1}/{max_retries}, error: {str(e)}, response: {response}"
             )
-            time.sleep(timeout)  # 失败后等待 2 秒再重试
+            time.sleep(timeout)  # 失败后等待 1 秒再重试
     return output  # 返回最低分，防止影响整体流程
 
 
@@ -840,7 +895,7 @@ class AcademicTreeSearchEngine:
                     logger.warning(
                         f"LLM analysis failed (attempt {attempt+1}): {str(e)}"
                     )
-                    time.sleep(SLEPP_TIME_LLM)
+                    time.sleep(SLEEP_TIME_LLM)
 
             logger.error("All attempts to analyze query intent failed")
             return None
@@ -877,7 +932,7 @@ class AcademicTreeSearchEngine:
                     logger.warning(
                         f"LLM expansion evaluation failed (attempt {attempt+1}): {str(e)}"
                     )
-                    time.sleep(SLEPP_TIME_LLM)
+                    time.sleep(SLEEP_TIME_LLM)
 
             logger.error("All attempts to evaluate expansion need failed")
             return None

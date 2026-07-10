@@ -47,19 +47,15 @@ class ModelConfig:
 # Model configurations
 # buid your model locally, and set the url
 MODEL_CONFIGS = {
-    DEPLOYMENT_NAME: ModelConfig(
-        url=ENDPOINT,
-        max_len=8192,
-        model_name=DEPLOYMENT_NAME,
-        think_bool=False,
+    "qwen3-4b": ModelConfig(
+        url="http://localhost:11434/v1/chat/completions",
+        max_len=1024,
+        model_name="qwen3:4b",
         temperature=0.7,
         top_p=0.8,
-        retry_attempts=4,
-        timeout=120,
-        openai_client=OpenAI(
-            api_key=API_KEY,
-            base_url=ENDPOINT,
-        ),
+        top_k=20,
+        min_p=0,
+        timeout=600,
     ),
 
     "llama3-70b": ModelConfig(
@@ -153,15 +149,23 @@ class LLMClient:
     ) -> Optional[str]:
         """Make HTTP request with caching"""
         try:
-            if MODEL_CONFIGS[data["model"]].openai_client is not None:
-                return self._make_qwen3_request(data)
+            if "Qwen3" in data["model"]:  # 判断是否使用 Qwen3-32B 模型
+                res_content = self._make_qwen3_request(data)
             else:
                 response = self.session.post(url, json=data, timeout=timeout)
                 response.raise_for_status()
-                return response.json()["choices"][0]["message"]["content"]
+                res_data = response.json()["choices"][0]["message"]
+                res_content = res_data.get("content")
+                if not res_content and res_data.get("reasoning_content"):
+                    res_content = res_data.get("reasoning_content")
+            
+            # 防卡死降级机制：如果大模型返回为空，为了避免死循环重试，返回默认 JSON 占位符
+            if not res_content:
+                res_content = "{}"
+            return res_content
         except Exception as e:
             logger.error(f"Request failed: {str(e)}")
-            return None
+            return "{}"
 
     def _make_qwen3_request(self, data: Dict[str, Any]) -> Optional[str]:
         """Handle requests specifically for Qwen3-32B using OpenAI client"""
@@ -222,7 +226,7 @@ class LLMClient:
 client = LLMClient()
 
 
-@func_set_timeout(200)
+@func_set_timeout(600)
 def get_from_llm(
     messages: Union[str, List[Dict[str, str]]], model_name: str = "Qwen25-7B", **kwargs
 ) -> Optional[str]:
@@ -243,28 +247,54 @@ def get_from_llm(
     config = MODEL_CONFIGS[model_name]
 
 
+    is_json = False
+    if isinstance(messages, str):
+        if "json" in messages.lower():
+            is_json = True
+    elif isinstance(messages, list):
+        for msg in messages:
+            if isinstance(msg, dict) and "content" in msg and isinstance(msg["content"], str) and "json" in msg["content"].lower():
+                is_json = True
+                break
+
     # Format messages
     formatted_messages = client.format_messages(messages, model_name)
 
+    # 如果是本地 qwen3 的 json 请求，应用 assistant pre-fill 与 stop 截断
+    use_prefill = False
+    if ("qwen3" in model_name.lower()) and is_json:
+        formatted_messages.append({"role": "assistant", "content": "{\n"})
+        use_prefill = True
+
     # Prepare request data
     data = {
-        "model": model_name,
+        "model": config.model_name if config.model_name else model_name,
         "messages": formatted_messages,
         "tools": [],
         "temperature": kwargs.get("temperature", config.temperature),
         "top_p": kwargs.get("top_p", config.top_p),
         "n": 1,
-        "max_tokens": kwargs.get("max_len", config.max_len),
+        "max_tokens": min(kwargs.get("max_len", config.max_len), 4096),
+        "presence_penalty": 1.2,
+        "frequency_penalty": 1.2,
         "stream": False,
     }
+    if use_prefill:
+        data["stop"] = ["}"]
 
-    logger.info(f"Requesting {model_name} at {config.url}")
+    logger.info(f"Requesting {model_name} at {config.url} (prefill={use_prefill})")
 
     # Make request with retries
     for attempt in range(config.retry_attempts):
         try:
             response = client._make_request(config.url, data, config.timeout)
             if response:
+                if use_prefill:
+                    stripped = response.strip()
+                    if not stripped.startswith("{"):
+                        response = "{\n" + response
+                    if not stripped.endswith("}"):
+                        response = response + "}"
                 if "</think>" in response:
                     response = response.split("</think>")[-1]
                 return response

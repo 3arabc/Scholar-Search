@@ -15,7 +15,11 @@ import sys
 import os
 import traceback
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# 自动将工作目录切换到当前脚本所在的绝对路径，确保相对路径读取正确
+script_dir = os.path.dirname(os.path.abspath(__file__))
+if script_dir:
+    os.chdir(script_dir)
+BASE_DIR = script_dir
 
 # 添加项目路径
 if BASE_DIR not in sys.path:
@@ -77,6 +81,30 @@ async def read_root():
 async def health_check():
     """健康检查接口"""
     return {"status": "healthy", "message": "Scholar Paper Search API is running"}
+
+@app.get("/logs")
+async def get_logs():
+    """读取并返回最新的运行日志内容"""
+    import os
+    from datetime import datetime
+    current_date = datetime.now().strftime("%Y%m%d")
+    log_file = f"./log/search_pipe_{current_date}.log"
+    
+    if os.path.exists(log_file):
+        try:
+            # 依次尝试 utf-8 和 gbk 编码读取，防止旧日志编码冲突
+            for enc in ['utf-8', 'gbk', 'gb18030']:
+                try:
+                    with open(log_file, 'r', encoding=enc) as f:
+                        content = f.read()
+                    return HTMLResponse(content=f"<pre style='white-space: pre-wrap; word-wrap: break-word;'>{content}</pre>")
+                except UnicodeDecodeError:
+                    continue
+            return HTMLResponse(content="无法以 UTF-8 或 GBK 编码解析日志文件。")
+        except Exception as e:
+            return HTMLResponse(content=f"读取日志出错: {str(e)}")
+    else:
+        return HTMLResponse(content=f"未找到今日的日志文件: {log_file}")
 
 @app.post("/search", response_model=SearchResponse)
 async def search_papers(request: SearchRequest):
@@ -493,10 +521,21 @@ if __name__ == "__main__":
     templates_dir = os.path.join(BASE_DIR, "api", "templates")
     os.makedirs(templates_dir, exist_ok=True)
 
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=8000,
-        reload=False,
-        log_level="info"
-    )
+    logger.info("Starting Scholar Paper Search Frontend Server...")
+    print("\n" + "="*60)
+    print("学术论文智能搜索服务与前端已开始启动...")
+    print("请在浏览器中打开以下链接进行访问: http://localhost:8000")
+    print("="*60 + "\n")
+
+    try:
+        uvicorn.run(
+            "demo_app_with_front:app",
+            host="0.0.0.0",
+            port=8000,
+            reload=False,
+            log_level="info"
+        )
+    except Exception as e:
+        logger.error(f"FastAPI Server 启动失败: {str(e)}")
+        logger.error(traceback.format_exc())
+        print(f"服务器启动时发生错误: {e}")

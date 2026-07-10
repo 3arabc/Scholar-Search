@@ -59,3 +59,7 @@ htmlcov/
 
 # === IPython 历史 ===
 ~/.ipython/
+
+# === 实验结果与临时切片数据集 ===
+gen_result/
+benchmark/*_select_*.jsonl

@@ -35,10 +35,10 @@ file_lst = [
     "./pipeline_spar.py"
 ]
 
-sample_num = 2000
-score_thresh = 0.5
-max_depth = 2
-relevance_doc_num = 10
+sample_num = 50  # 评测选用的题目总量。例如跑 50 题测试则设为 50，跑 10 题设为 10
+score_thresh = 0.5  # 文献推荐的相似度及格线。只有当大模型评估相似度分数 >= 该分值时，才把该文献列入最终的 Relevant 推荐列表中
+max_depth = 2  # 学术树最大下探检索层数。设为 2 代表最大为两轮自适应下探检索（第一层探索完评估不足则下探第二层）
+relevance_doc_num = 10  # 最终输出列表所包含的最大文献篇数限制（赛题一般限制最多提交 10 篇最相关论文）
 
 benchmark_map = {
     "AutoScholarQuery": {
@@ -47,13 +47,21 @@ benchmark_map = {
     },
     "OwnBenchmark": {
         "src_file": "./benchmark/spar_bench.jsonl",
-        "select_file": f"code_official/benchmark/spar_bench_select_{sample_num}.jsonl"
-
+        "select_file": f"./benchmark/spar_bench_select_{sample_num}.jsonl"
     },
 }
 
-benchmark_name = "AutoScholarQuery"
-# benchmark_name = "OwnBenchmark"
+# =============================================================================
+# 【数据集选择与命令行传参】
+# 运行时必须通过命令行传入数据集名称作为第一个参数。例如：
+#   python run_spr_agent.py OwnBenchmark
+#   python run_spr_agent.py AutoScholarQuery
+# =============================================================================
+if len(sys.argv) < 2:
+    print("错误: 缺少命令行参数。使用示例:")
+    print("  python run_spr_agent.py OwnBenchmark")
+    print("  python run_spr_agent.py AutoScholarQuery")
+    sys.exit(1)
 
 benchmark_name = sys.argv[1]
 
@@ -78,23 +86,23 @@ for one in file_lst:
     shutil.copy2(one, output_folder)
 
 already = {}
-for one in glob.glob(f"{output_folder}/*.json"):
-    with open(one, "r") as fr:
+for one in glob.glob(f"{output_folder}/*.json"):  # 【断点续传/秒级重入机制】
+    with open(one, "r", encoding="utf-8") as fr:
         info = json.load(fr)
     question = info["search_query"]
-    already[question] = one
+    already[question] = one  # 扫描已生成输出的 json，如果文件已经落地，则程序下次启动时自动跳过这道题，免去重复打分费用
 
-with open(src_file, "r") as f:
+with open(src_file, "r", encoding="utf-8") as f:
     if src_file.endswith(".jsonl"):
-        lines = f.readlines()
-        random.seed(123)
-        random.shuffle(lines)
-        lines = lines[:sample_num]
+        lines = f.readlines()  # 读取数据集的行
+        random.seed(123)  # 使用固定随机种子保证评测子集的可重复性
+        random.shuffle(lines)  # 将题目打乱
+        lines = lines[:sample_num]  # 切片挑选出前 sample_num 题运行测试
     elif src_file.endswith(".json"):
         lines = json.load(f)
     print(f"lines: {len(lines)}")
 
-    with open(select_file,"w") as fw:
+    with open(select_file,"w", encoding="utf-8") as fw:
         for one in lines:
             fw.write(one.strip() + "\n")
 

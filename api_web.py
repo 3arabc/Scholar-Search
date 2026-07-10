@@ -432,7 +432,10 @@ def search_doc_via_url_from_openalex(data):
     for ref_id in referenced_works:
         try:
             ref_url = f"https://api.openalex.org/works/{ref_id}"
-            ref_response = requests.get(ref_url, timeout=10)
+            headers = {
+                "User-Agent": "ScholarPaperAgent/1.0 (mailto:agentic-competition@example.com)"
+            }
+            ref_response = requests.get(ref_url, timeout=10, headers=headers)
             if ref_response.status_code == 200:
                 ref_data = ref_response.json()
                 is_open = ref_data.get("open_access", {}).get("is_oa", False)
@@ -556,8 +559,14 @@ def search_paper_via_query_from_openalex(
             "page": page,
             "per-page": per_page,
         }
+        headers = {
+            "User-Agent": "ScholarPaperAgent/1.0 (mailto:agentic-competition@example.com)"
+        }
         for i in range(4):
-            response = requests.get(base_url, params=params)
+            import random
+            import time
+            time.sleep(random.uniform(0.5, 2.0))
+            response = requests.get(base_url, params=params, headers=headers)
 
             if response.status_code == 200:
                 data = response.json()
@@ -795,15 +804,11 @@ def google_search_arxiv_id(query, try_num=4, num=10, end_date=""):
         except:
             search_query = f"{query} site:arxiv.org"
 
-    payload = json.dumps(
-        {
-            "q": search_query,
-            "num": num,
-            # "autocorrect": True,
-            "page": 1,
-            # "type":"search"
-        }
-    )
+    payload = {
+        "q": search_query,
+        "num": num,
+        "page": 1,
+    }
 
     GOOGLE_SERPER_KEY = os.getenv("GOOGLE_SERPER_KEY", "xxx")
     logger.info(
@@ -814,8 +819,8 @@ def google_search_arxiv_id(query, try_num=4, num=10, end_date=""):
 
     for _ in range(try_num):
         try:
-            response = requests.request(
-                "POST", url, headers=headers, data=payload, timeout=10, proxies=PROXIES
+            response = requests.post(
+                url, headers=headers, json=payload, timeout=10, proxies=PROXIES
             )
             if response.status_code == 200:
                 results = json.loads(response.text)

@@ -14,7 +14,7 @@ logging_file_path = os.path.join(log_dir, f"search_pipe_{current_date}.log")
 # logging_file_path = os.path.join(log_dir, f"server_pipe_test.log")
 
 # Configure handlers
-handlers = [logging.FileHandler(logging_file_path), logging.StreamHandler(sys.stdout)]
+handlers = [logging.FileHandler(logging_file_path, encoding='utf-8'), logging.StreamHandler(sys.stdout)]
 
 # Set logging level (DEBUG overrides INFO)
 level = logging.INFO
