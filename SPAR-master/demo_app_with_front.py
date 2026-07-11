@@ -35,6 +35,12 @@ class SearchRequest(BaseModel):
     max_depth: Optional[int] = 1  # 搜索树最大深度
     relevance_doc_num: Optional[int] = 10  # 相关文档数量
     similarity_threshold: Optional[float] = 0.5  # 相似度阈值
+    # 新增筛选字段
+    filter_year_start: Optional[int] = None
+    filter_year_end: Optional[int] = None
+    filter_min_citations: Optional[int] = None
+    filter_fields: Optional[List[str]] = []
+    sort_by: Optional[str] = 'year'  # 可选值: 'year', 'citations', 'similarity'
 
 # 响应模型
 class SearchResponse(BaseModel):
@@ -96,9 +102,17 @@ async def search_papers(request: SearchRequest):
             os.environ["GOOGLE_SERPER_KEY"] = request.google_serper_key
             logger.info(f"Google Serper Key set from request: {request.google_serper_key}")
 
+        filter_config = {
+            'year_start': request.filter_year_start,
+            'year_end': request.filter_year_end,
+            'min_citations': request.filter_min_citations,
+            'fields': request.filter_fields,
+            'missing_field_pass': True,
+        }
+
         if request.use_advanced_search:
             # 使用高级搜索（包含query改写、意图判断、rerank等完整pipeline）
-            return await _advanced_search(request)
+            return await _advanced_search(request, filter_config=filter_config, sort_by=request.sort_by)
         else:
             # 使用简单搜索
             return await _simple_search(request)
@@ -349,7 +363,7 @@ def process_paper_collection(papers_data, source='unknown', is_dict_format=True,
     return papers_list, papers_dict
 
 
-async def _advanced_search(request: SearchRequest) -> SearchResponse:
+async def _advanced_search(request: SearchRequest, filter_config: dict = None, sort_by: str = 'year') -> SearchResponse:
     """
     高级搜索模式，使用AcademicSearchTree进行完整的搜索流程
     包含query改写、意图判断、rerank等功能
@@ -373,7 +387,12 @@ async def _advanced_search(request: SearchRequest) -> SearchResponse:
                 )
 
                 # 执行搜索（包含完整pipeline）
-                sorted_docs = search_agent.search(query, end_date=request.end_date)
+                sorted_docs = search_agent.search(
+                    query,
+                    end_date=request.end_date,
+                    filter_params=filter_config,
+                    sort_by=sort_by
+                )
 
                 if not sorted_docs:
                     logger.warning(f"No documents found for query: {query}")
@@ -421,7 +440,40 @@ async def _advanced_search(request: SearchRequest) -> SearchResponse:
             search_tree=search_trees,
             valid_papers = sum(1 for p in all_papers.values() if p.get('is_valid', False))  # wsl-73
         )
-
+        '''
+        #wsl-76 ========== 🆕 只保留得分最高的 Top 5 ==========
+        if all_papers:
+            # 1. 按 sim_score 降序排序
+            sorted_papers = sorted(
+                all_papers.items(),
+                #key=lambda x: x[1].get('sim_score', 0),
+                key=lambda x: x[1].get('rerank_score', x[1].get('sim_score', 0)),
+                reverse=True
+            )
+            top5_ids = [pid for pid, _ in sorted_papers[:5]]
+            # 2. 更新 all_papers
+            all_papers = {pid: all_papers[pid] for pid in top5_ids}
+            # 3. 更新 query_results (all_results)
+            for query in all_results:
+                all_results[query] = [
+                    p for p in all_results[query]
+                    if p.get('paper_id') in top5_ids
+                ]
+            # 4. 更新 total_papers
+            total_papers = len(all_papers)
+        else:
+            total_papers = 0
+        # 构造响应（使用过滤后的数据）
+        response = SearchResponse(
+            status="success",
+            total_papers=total_papers,  # 更新后的数量
+            query_results=all_results,  # 过滤后的 query_results
+            all_papers=all_papers,  # 过滤后的 all_papers
+            query_source_map=query_source_map,
+            search_tree=search_trees,
+            valid_papers=sum(1 for p in all_papers.values() if p.get('is_valid', False))
+        )
+        '''
         logger.info(f"Advanced search completed successfully. Found {len(all_papers)} papers")
         return response
 
@@ -440,7 +492,7 @@ async def _advanced_search(request: SearchRequest) -> SearchResponse:
         )
 
 
-async def _simple_search(request: SearchRequest) -> SearchResponse:
+async def _simple_search(request: SearchRequest, filter_config: dict = None) -> SearchResponse:
     """
     简单搜索模式，使用MultiSearchAgent进行基础搜索
     """

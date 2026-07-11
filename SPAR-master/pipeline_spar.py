@@ -50,9 +50,12 @@ class AcademicSearchTree:
     def __init__(
         self,
         max_depth: int = 1,
-        max_docs: int = 50,
+        max_docs: int = 200,
         similarity_threshold: float = 0.6,
         search_engine=None,
+        enable_llm_rerank=True,  # wsl-73 二次筛选
+        llm_threshold=0.7,
+        filter_config=None
     ):
         # Search parameters
         self.max_depth = max_depth
@@ -66,6 +69,9 @@ class AcademicSearchTree:
         self.high_score_thresh = 0.75
         self.search_engine = AcademicTreeSearchEngine()
         self.reranker = Reranker()
+        self.enable_llm_rerank = enable_llm_rerank  # wsl-73 二次筛选
+        self.llm_threshold = llm_threshold
+        self.filter_config = filter_config or {}
 
     def _cleanup_resources(self):
         """Perform cleanup of resources after search is completed"""
@@ -86,6 +92,109 @@ class AcademicSearchTree:
             logger.info("Cleanup completed successfully")
         except Exception as e:
             logger.error(f"Error during cleanup: {str(e)}")
+
+    #wsl-710 过滤
+    def _filter_docs(self, docs_dict: dict, filter_config: dict = None) -> dict:
+        """
+        根据传入的 filter_config 过滤文档，如果 filter_config 为 None，则从 global_config 读取。
+        根据全局配置过滤文档：
+        - 年份范围（FILTER_YEAR_START ~ FILTER_YEAR_END）
+        - 引用数（>= FILTER_MIN_CITATIONS）
+        - 研究领域（包含 FILTER_FIELDS 中任意一个）
+        返回过滤后的字典（仅保留符合条件的文档）。
+        """
+        logger.info(f"_filter_docs received filter_config: {filter_config}")
+        if not docs_dict:
+            return {}
+
+        if filter_config is None:
+            from global_config import (
+                FILTER_YEAR_START, FILTER_YEAR_END,
+                FILTER_MIN_CITATIONS, FILTER_FIELDS,
+                FILTER_ENABLE_YEAR, FILTER_ENABLE_CITATIONS, FILTER_ENABLE_FIELDS,
+                FILTER_MISSING_FIELD_PASS
+            )
+        else:
+            # 从传入的 dict 中提取参数
+            FILTER_YEAR_START = filter_config.get('year_start')
+            FILTER_YEAR_END = filter_config.get('year_end')
+            FILTER_MIN_CITATIONS = filter_config.get('min_citations')
+            FILTER_FIELDS = filter_config.get('fields', [])
+            FILTER_MISSING_FIELD_PASS = filter_config.get('missing_field_pass', True)
+
+        filtered = {}
+        for doc_id, doc in docs_dict.items():
+
+            # 默认通过
+            passed = True
+
+            # 1. 年份过滤（如果启用）
+            if FILTER_YEAR_START is not None or FILTER_YEAR_END is not None:
+                year = doc.get("publicationYear") or doc.get("year")
+                if year is not None:
+                    try:
+                        year = int(year)
+                        if FILTER_YEAR_START is not None and year < FILTER_YEAR_START:
+                            passed = False
+                        if FILTER_YEAR_END is not None and year > FILTER_YEAR_END:
+                            passed = False
+                    except:
+                        # 解析失败，按缺失处理
+                        if not FILTER_MISSING_FIELD_PASS:
+                            passed = False
+                else:
+                    # 字段缺失
+                    if not FILTER_MISSING_FIELD_PASS:
+                        passed = False
+
+            # 2. 引用数过滤（如果启用）
+            if FILTER_MIN_CITATIONS is not None and passed:
+                citations = doc.get("citationCount") or doc.get("citations")
+                if citations is not None:
+                    try:
+                        citations = int(citations)
+                        if FILTER_MIN_CITATIONS is not None and citations < FILTER_MIN_CITATIONS:
+                            passed = False
+                    except:
+                        if not FILTER_MISSING_FIELD_PASS:
+                            passed = False
+                else:
+                    if not FILTER_MISSING_FIELD_PASS:
+                        passed = False
+
+            # 3. 领域过滤（如果启用且 FILTER_FIELDS 非空）
+            if  FILTER_FIELDS and passed:
+                fields = doc.get("fieldsOfStudy") or doc.get("concepts")
+                if fields:
+                    # 如果是列表，检查是否至少有一个匹配
+                    if isinstance(fields, list):
+                        matched = False
+                        for field in fields:
+                            if isinstance(field, dict):
+                                field_name = field.get("name") or field.get("display_name") or ""
+                            else:
+                                field_name = str(field)
+                            if any(f.lower() in field_name.lower() for f in FILTER_FIELDS):
+                                matched = True
+                                break
+                        if not matched:
+                            passed = False
+                    else:
+                        # 如果是字符串，直接匹配
+                        field_str = str(fields)
+                        if not any(f.lower() in field_str.lower() for f in FILTER_FIELDS):
+                            passed = False
+                else:
+                    # 字段缺失
+                    if not FILTER_MISSING_FIELD_PASS:
+                        passed = False
+
+            # 如果所有条件都通过，保留文档
+            if passed:
+                filtered[doc_id] = doc
+
+        logger.info(f"Filtering: kept {len(filtered)} out of {len(docs_dict)} documents")
+        return filtered
 
     def meet_stop_condition(self, current_depth=0):
         """
@@ -728,7 +837,7 @@ class AcademicSearchTree:
 
         return level_node, search_queue, query_node_relations
 
-    def search(self, initial_query: str, end_date="") -> List:
+    def search(self, initial_query: str, end_date="", filter_params: dict = None, sort_by: str = 'year') -> List:
         """
         Main search method that:
         1. Initializes search tree with root query
@@ -743,13 +852,17 @@ class AcademicSearchTree:
         Returns:
             Dictionary of relevant documents
         """
+        if filter_params is not None:
+            self.filter_config = filter_params
+        logger.info(f"search() received filter_params: {filter_params}")
+
         search_start_time = time.time()
 
         # Set search date
         self.search_date = ""
 
         # Initialize search tree
-        logger.info("Initializing academic search tree")
+        logger.info(" Initializing academic search tree")
         self.root = SearchNode(
             query_str=initial_query,
             status="INIT",
@@ -849,29 +962,99 @@ class AcademicSearchTree:
             )
 
             # wsl-73二次筛选
-            if ENABLE_LLM_RERANK:  # 需要先在 global_config 中定义这个开关
-                logger.info("Applying LLM fine-grained filtering...")
+            if ENABLE_LLM_RERANK:
+                logger.info("Applying LLM fine-grained filtering on reranked top docs...")
+                # 获取重排序后的文档（如果存在）
+                reranked_docs = self.root.reranked_top_docs if self.root.reranked_top_docs else list(
+                    self.root.searched_docs.values())
+                # 只对前 TOP_FOR_LLM_FILTER 篇打分
+                TOP_FOR_LLM_FILTER = 50  # 可调
+                docs_to_filter = reranked_docs[:TOP_FOR_LLM_FILTER]
                 filtered_docs = {}
-                for doc_id, doc in self.root.searched_docs.items():
-                    # 调用 LLM 评分
+                for doc in docs_to_filter:
+                    doc_id = doc.get("paper_id", "")
+                    if not doc_id:
+                        continue
                     llm_score = llm_relevance_score(self.user_query, doc)
-                    doc['llm_score'] = llm_score  # 记录用于调试
-                    if llm_score >= LLM_RERANK_THRESHOLD:
+                    doc['llm_score'] = llm_score
+                    # 降低阈值，避免误杀
+                    if llm_score >= 0.3:  # 调低阈值，宁可多留一些
                         filtered_docs[doc_id] = doc
                     else:
                         logger.debug(f"Filtered doc {doc_id} with LLM score {llm_score:.2f}")
+                # 将未过滤的文档（超出TOP_FOR_LLM_FILTER的部分）也保留，但分数用原分数
+                for doc in reranked_docs[TOP_FOR_LLM_FILTER:]:
+                    doc_id = doc.get("paper_id", "")
+                    if doc_id and doc_id not in filtered_docs:
+                        filtered_docs[doc_id] = doc
                 self.root.searched_docs = filtered_docs
                 logger.info(f"After LLM filter: {len(filtered_docs)} documents kept")
+            # wsl-710 ===== 新增：应用硬性过滤条件 =====
+            if self.root.searched_docs:
+                self.root.searched_docs = self._filter_docs(
+                    self.root.searched_docs,
+                    filter_config=self.filter_config
+                )
+            #if self.root.searched_docs:
+            #    self.root.searched_docs = self._filter_docs(self.root.searched_docs)
+            #    logger.info(f"After filter: {len(self.root.searched_docs)} documents remain")
 
-            # wsl-73
-            # Rerank disabled: LLM cost >> benefit, use BGE-M3 sim_score as sole criterion
-            # if RERANK:
-            #     logger.info("Reranking final document list")
-            #     reranked_docs = self.reranker.rerank_query_and_doc_list(
-            #         self.root.searched_docs, self.user_query
-            #     )
-            #     self.root.reranked_top_docs = reranked_docs
+            if RERANK:
+                logger.info("Applying LLM reranking on all collected docs...")
+                all_docs = list(self.root.searched_docs.values())
+                if all_docs:
+                    reranked_list = self.reranker.rerank_query_and_doc_list(
+                        all_docs, self.user_query, score_name="sim_score",sort_by=sort_by
+                    )
+                    if reranked_list:
+                        # 截断到 MAX_DOCS（保持排序顺序）
+                        reranked_list = reranked_list[:MAX_DOCS]
+                        # 构建有序字典（Python 3.7+ 保留插入顺序）
+                        new_searched = {}
+                        for doc in reranked_list:
+                            doc_id = doc.get("paper_id", "")
+                            if doc_id:
+                                # 保留 rerank_score 作为 sim_score 以便下游使用
+                                doc['sim_score'] = doc.get('rerank_score', doc.get('sim_score', 0.0))
+                                new_searched[doc_id] = doc
+                        self.root.searched_docs = new_searched
+                        self.root.reranked_top_docs = reranked_list  # 保存排序列表以备后用
+                        logger.info(f"Reranking done. Kept {len(new_searched)} docs.")
+                    else:
+                        logger.warning("Reranking returned empty, keeping original.")
+                        # 如果重排序失败，回退到原有按 sim_score 排序截断
+                        if self.root.searched_docs:
+                            sorted_items = sorted(
+                                self.root.searched_docs.items(),
+                                key=lambda item: item[1].get('sim_score', 0.0),
+                                reverse=True
+                            )
+                            filtered = {}
+                            kept = 0
+                            for doc_id, doc in sorted_items:
+                                if doc.get('sim_score', 0.0) >= SIM_THRESHOLD and kept < MAX_DOCS:
+                                    filtered[doc_id] = doc
+                                    kept += 1
+                            self.root.searched_docs = filtered
+                            logger.info(f"Fallback filter: kept {kept} docs")
+            else:
+                # 不启用 RERANK，执行原有的按 sim_score 排序截断
+                if self.root.searched_docs:
+                    sorted_items = sorted(
+                        self.root.searched_docs.items(),
+                        key=lambda item: item[1].get('sim_score', 0.0),
+                        reverse=True
+                    )
+                    filtered = {}
+                    kept = 0
+                    for doc_id, doc in sorted_items:
+                        if doc.get('sim_score', 0.0) >= SIM_THRESHOLD and kept < MAX_DOCS:
+                            filtered[doc_id] = doc
+                            kept += 1
+                    self.root.searched_docs = filtered
+                    logger.info(f"Final filter: kept {kept} docs (threshold={SIM_THRESHOLD}, max={MAX_DOCS})")
 
+            # 最后返回结果（需修改 _collect_results 避免打乱顺序）
             return self._collect_results()
 
         except Exception as e:
@@ -883,7 +1066,19 @@ class AcademicSearchTree:
             self._cleanup_resources()
 
     def _collect_results(self) -> Dict:
-        """Collect search results: sort by sim_score desc, take top max_docs."""
+        """Collect search results with diversity optimization, but respect reranked order if available."""
+        # 如果重排序结果存在，直接返回（保持顺序）
+        if hasattr(self.root, 'reranked_top_docs') and self.root.reranked_top_docs:
+            # 构建 all_papers 字典（用于前端）
+            all_papers = {}
+            for doc in self.root.reranked_top_docs:
+                doc_id = doc.get("paper_id", "")
+                if doc_id:
+                    all_papers[doc_id] = doc
+            # 返回结构（模拟原 _collect_results 返回值）
+            return all_papers   # 但原 _collect_results 返回的是字典，不是列表
+        # 否则执行原有逻辑（多样性选择）
+        # Get all documents
         all_docs = self.root.searched_docs
         sorted_docs = sorted(
             all_docs.items(),

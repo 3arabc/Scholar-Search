@@ -37,6 +37,7 @@ from datetime import datetime
 from collections import defaultdict
 
 from local_db_v2 import db_path, ArxivDatabase
+from rerank import Reranker
 
 def get_info_from_local(id_list):
     already = []
@@ -730,12 +731,13 @@ def _calculate_similarity_with_retry(
 class AcademicTreeSearchEngine:
 
     def __init__(
-        self,
+        self, max_depth=2, max_docs=10, similarity_threshold=0.5
     ):
         self.current_date = datetime.now().strftime("%Y-%m-%d")
         self.mretrival_processer = MultiSearchAgent()
         self._emd_model = None  # 用于存储懒加载的实例
         self._selector = None  # 用于存储懒加载的实例
+        self.max_docs = max_docs  # 用于控制返回数量
 
     @property
     def emd_model(self):
@@ -865,6 +867,17 @@ class AcademicTreeSearchEngine:
                 )
                 result["expanded_queries"] = []
                 result["expansion_reason"] += " (expansion generation failed)"
+        #wsl-78 # 确保至少有一个强制短语查询（防止 LLM 生成空列表或失败）
+        phrase_query = self._generate_phrase_query(query)
+        if phrase_query:
+            if not result["expanded_queries"]:
+                # 如果没有任何扩展查询，则使用强制短语作为唯一查询
+                result["expanded_queries"] = [phrase_query]
+                logger.info(f"Fallback: added forced phrase query: {phrase_query}")
+            elif phrase_query not in result["expanded_queries"]:
+                # 如果已有扩展查询，但强制短语不在其中，则追加
+                result["expanded_queries"].append(phrase_query)
+                logger.info(f"Added forced phrase query (final check): {phrase_query}")
         return result
 
     def _analyze_query_intent(self, query: str):
@@ -957,6 +970,176 @@ class AcademicTreeSearchEngine:
             logger.error(f"Error in expansion evaluation: {traceback.format_exc()}")
             return None
 
+    '''
+    #wsl-76 混合扩展策略，综合考虑查询意图、领域复杂度、特殊模式
+    def _generate_expanded_queries(self, query: str, domain: str, intent: str):
+        """
+        根据查询特征和意图，采用混合策略生成扩展查询。
+        策略顺序：
+        1. 精确标题匹配 → 不扩展，直接返回原始查询。
+        2. 综述/综述意图 → 使用 survey 模板。
+        3. 复杂领域或明确技术细节 → 使用 domain-aware 模板。
+        4. 其他情况 → 使用 PASA 模板（快速通用）。
+        5. 所有 LLM 尝试失败 → 返回基于规则的 fallback 查询。
+        """
+        from datetime import datetime
+        current_year = datetime.now().year
+        previous_year = current_year - 1
+
+        # ----- 1. 精确标题检测（不扩展）-----
+        # 如果查询看起来像一篇论文标题（包含引号、或长度适中且无问号等）
+        if self._is_exact_title_query(query):
+            logger.info(f"Detected exact paper title, skipping expansion: {query}")
+            return [query]
+
+        # ----- 2. 判断是否为综述意图（使用 survey 模板）-----
+        # 注意：这里的 _is_survey_focused 已经是您已有的方法，但可能较慢；我们先用关键词快速判断
+        if self._is_survey_focused(intent) or self._has_survey_keywords(query):
+            logger.info(f"Using survey-focused expansion for: {query}")
+            prompt = template_query_fusion_survery_forcus.format(
+                user_query=query,
+                user_input_N=3,  # 只生成 3 条，避免过多
+                current_year=current_year,
+                previous_year=previous_year,
+            )
+            prompt_type = "survey"
+        else:
+            # ----- 3. 检查领域复杂度（若 domain 非空且非 undefined，使用 domain-aware）-----
+            if domain and domain.lower() != "undefined" and self._is_complex_domain(domain):
+                logger.info(f"Using domain-aware expansion for query in {domain}")
+                prompt = template_domain_aware_query_expansion.format(
+                    user_input_N=4,  # 生成 4 条
+                    user_query=query,
+                    intent=intent,
+                    domain=domain,
+                    current_year=current_year,
+                    previous_year=previous_year,
+                )
+                prompt_type = "domain"
+            else:
+                # ----- 4. 默认使用 PASA 模板（快速）-----
+                logger.info(f"Using PASA template for query expansion")
+                prompt = template_query_fusion_pasa.format(user_query=query)
+                prompt_type = "pasa"
+
+        # 重试与解析逻辑（与您原有代码一致，但增加了超时和 continue）
+        best_response = None
+        best_query_count = 0
+        logger.info(f"Expand query prompt for LLM: {prompt}")
+
+        for attempt in range(LLM_TRY_COUNT):
+            try:
+                response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
+                response = fetch_string(response)
+                logger.info(f"Expanded queries response: {response}")
+
+                parsed_response = extract_json(response)
+                if parsed_response is None:
+                    logger.warning("Failed to parse JSON, attempting to extract from text")
+                    # 尝试从文本中提取 JSON（已有逻辑）
+                    continue
+
+                expanded_queries = self._extract_queries_from_response(parsed_response, prompt_type)
+                if expanded_queries:
+                    # 去重并过滤空
+                    expanded_queries = [q.strip() for q in expanded_queries if q.strip()]
+                    # 去重，保留顺序
+                    seen = set()
+                    unique_queries = []
+                    for q in expanded_queries:
+                        if q not in seen:
+                            seen.add(q)
+                            unique_queries.append(q)
+                    expanded_queries = unique_queries
+
+                    if len(expanded_queries) > 0:
+                        best_response = expanded_queries
+                        best_query_count = len(expanded_queries)
+                        # 如果已经生成了足够的查询（≥3），直接返回
+                        if best_query_count >= 3:
+                            return best_response
+
+            except Exception as e:
+                logger.warning(f"LLM expansion failed (attempt {attempt + 1}): {str(e)}")
+                time.sleep(SLEEP_TIME_LLM)
+                continue
+
+        # 如果 LLM 扩展失败或结果不理想，使用 fallback
+        if best_response and len(best_response) > 0:
+            logger.info(f"Using best response from {LLM_TRY_COUNT} attempts: {len(best_response)} queries")
+            return best_response
+
+        logger.error("All LLM expansion attempts failed, using rule-based fallback")
+        return self._generate_rule_based_expansions(query, domain)
+
+    # ---------- 新增辅助方法 ----------
+    def _is_exact_title_query(self, query: str) -> bool:
+        """判断查询是否为精确的论文标题（例如包含引号，或者长度在合理范围且无疑问词）"""
+        # 如果查询被引号包围
+        if (query.startswith('"') and query.endswith('"')) or (query.startswith("'") and query.endswith("'")):
+            return True
+        # 如果查询长度适中（10~80字符）且不含问号、不含“what”等疑问词
+        question_words = {"what", "who", "which", "where", "when", "why", "how", "is", "are", "do", "does", "can",
+                          "could", "would"}
+        if 10 < len(query) < 80 and not any(query.lower().startswith(w) for w in question_words):
+            # 且包含至少一个常见学术词汇（可选）
+            return True
+        return False
+
+    def _has_survey_keywords(self, query: str) -> bool:
+        """检查查询是否包含综述相关关键词"""
+        survey_terms = {"survey", "review", "overview", "state-of-the-art", "literature", "comprehensive", "summary"}
+        return any(term in query.lower() for term in survey_terms)
+
+    def _generate_rule_based_expansions(self, query: str, domain: str) -> List[str]:
+        """当 LLM 失败时，使用简单的规则生成几个变体查询，确保搜索能继续"""
+        # 1. 提取关键词（这里可以复用 extract_keywords，但可能需要确保返回多个）
+        # 简单做法：按空格拆分，取前几个词
+        words = query.split()
+        if len(words) <= 3:
+            return [query]  # 太短就不扩展
+        # 生成几个变体：去掉停用词、添加 "survey" 等
+        stopwords = {"a", "an", "the", "of", "for", "on", "at", "to", "in", "with", "without", "by"}
+        filtered = [w for w in words if w.lower() not in stopwords]
+        if len(filtered) >= 3:
+            base = " ".join(filtered[:4])
+            return [
+                       query,
+                       f"survey on {base}",
+                       f"recent advances in {base}",
+                       f"{base} methods"
+                   ][:3]  # 最多3条
+        else:
+            return [query]
+    '''
+    #wsl-78
+    def _generate_phrase_query(self, query: str) -> str:
+        """
+        自动从原始查询中提取核心词，生成一个引号包裹的精确短语查询。
+        该查询会被强制加入扩展列表，提高精准命中率。
+        """
+        import re
+        # 常见停用词（包含疑问词、通用学术词汇）
+        stopwords = {
+            "which", "what", "who", "where", "when", "why", "how", "is", "are", "was", "were",
+            "do", "does", "did", "can", "could", "would", "should", "may", "might", "must",
+            "the", "a", "an", "of", "for", "on", "at", "to", "in", "with", "without", "by",
+            "papers", "studies", "research", "work", "works", "contribute", "advancement",
+            "provide", "tell", "list", "name", "mention", "about", "that", "through",
+            "using", "based", "approach", "method", "technique", "framework", "model",
+            "algorithm", "system", "task", "problem", "solution"
+        }
+        # 分词（保留字母数字和下划线）
+        words = re.findall(r'\b[a-zA-Z0-9_\-]+\b', query.lower())
+        # 过滤停用词和过短词
+        core_words = [w for w in words if w not in stopwords and len(w) > 2]
+        if len(core_words) < 2:
+            # 如果核心词太少，直接返回原查询并用引号包裹
+            return f'"{query.strip()}"'
+        # 取前6个核心词作为短语（保留原始顺序）
+        phrase = " ".join(core_words[:6])
+        return f'"{phrase}"'
+
     def _generate_expanded_queries(self, query: str, domain: str, intent: str):
         """
         Generate expanded queries based on the original query, domain and intent.
@@ -980,13 +1163,18 @@ class AcademicTreeSearchEngine:
             current_year = datetime.now().year
             previous_year = current_year - 1
 
+            # wsl-76------ 强制使用 PASA 模板 -----
+            logger.info(f"Using forced PASA template for query expansion")
+            prompt = template_query_fusion_pasa.format(user_query=query)
+            prompt_type = "pasa"
+            '''
             # Determine the appropriate template based on query analysis
-            if FUSION_TEMPLATE == "AUTOMATIC" and  self._is_survey_focused(intent):  #wsl应该是写错了
+            if FUSION_TEMPLATE == "AUTOMATIC" and  self._is_survey_focused(intent):
                 # For survey-focused queries, prioritize finding comprehensive reviews
                 logger.info(f"Using survey-focused expansion for query: {query}")
                 prompt = template_query_fusion_survery_forcus.format(
                     user_query=query,
-                    user_input_N=5,
+                    user_input_N=3, #wsl-74
                     current_year=current_year,
                     previous_year=previous_year,
                 )
@@ -1025,6 +1213,7 @@ class AcademicTreeSearchEngine:
                     user_input_N=5, user_query=query, intent=intent, domain=domain
                 )
                 prompt_type = "domain"
+            '''
 
             # Track attempts and keep best result
             best_response = None
@@ -1086,6 +1275,12 @@ class AcademicTreeSearchEngine:
                     logger.debug(f"Extracted queries: {expanded_queries}")
 
                     if expanded_queries:
+                        #wsl-78 ----- 新增：强制添加精确短语查询 -----
+                        phrase_query = self._generate_phrase_query(query)
+                        if phrase_query not in expanded_queries:
+                            expanded_queries.append(phrase_query)
+                            logger.info(f"Added forced phrase query: {phrase_query}")
+                        # --------------------------------------
                         # Track best response by number of queries
                         if len(expanded_queries) > best_query_count:
                             best_response = expanded_queries
@@ -1100,9 +1295,15 @@ class AcademicTreeSearchEngine:
                         f"LLM expansion failed (attempt {attempt+1}): {str(e)}"
                     )
                     time.sleep(SLEEP_TIME_LLM)
+                    continue  #wsl-74 继续下一次尝试
 
             # If we tried all attempts but still have a valid best response, return it
             if best_response and len(best_response) > 0:
+                #wsl-78 添加强制短语查询（如果尚未包含）
+                phrase_query = self._generate_phrase_query(query)
+                if phrase_query not in best_response:
+                    best_response.append(phrase_query)
+                    logger.info(f"Added forced phrase query to best_response: {phrase_query}")
                 logger.info(
                     f"Using best response from {LLM_TRY_COUNT} attempts: {len(best_response)} queries"
                 )
@@ -1112,7 +1313,13 @@ class AcademicTreeSearchEngine:
             logger.error(
                 "All attempts to generate expanded queries failed, using fallback"
             )
-            return self._generate_fallback_queries(query, domain)
+            #return self._generate_fallback_queries(query, domain)
+            fallback_queries = self._generate_fallback_queries(query, domain)
+            phrase_query = self._generate_phrase_query(query)
+            if phrase_query not in fallback_queries:
+                fallback_queries.append(phrase_query)
+                logger.info(f"Added forced phrase query to fallback: {phrase_query}")
+            return fallback_queries
 
         except Exception as e:
             logger.error(f"Error generating expanded queries: {traceback.format_exc()}")
@@ -1396,6 +1603,25 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
                 sources=sources,
             )
         )
+        #wsl-77 ===== 新增：对每个查询的结果进行 BGE 重排序 =====
+        reranked_output = {}
+        for query, docs in output.items():
+            if docs:
+                # 调用 rerank_score_bge，返回排序后的文档列表
+                sorted_docs = self.rerank_score_bge(query, docs)
+                # 取前 max_docs 个
+                reranked_output[query] = sorted_docs[:self.max_docs]
+            else:
+                reranked_output[query] = []
+
+        # 重新构建 id2docs（使用重排序后的文档）
+        final_id2docs = {}
+        for docs in reranked_output.values():
+            for doc in docs:
+                doc_id = doc.get("paper_id", doc.get("arxivId", ""))
+                if doc_id:
+                    final_id2docs[doc_id] = doc
+
         return output, id2docs, query_source_map, query_keywords2raw
 
     def search_papers(self, queries, end_date="", searched_docs=dict()):
@@ -1451,7 +1677,7 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
         logger.info("calculate_sim_bge ...")
         relevace_docs = []
         irrelevace_docs = []
-
+        '''
         golden_paper_info = [
             "Title:{}\nAbstract:{}Authors:{}".format(
                 doc.get("title", ""),
@@ -1460,19 +1686,38 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
             )
             for doc in docs
         ]
+        '''
+        golden_paper_info = [
+            "Title:{}\nAbstract:{}".format(
+                doc.get("title", ""),
+                doc.get("abstract", ""),
+            )
+            for doc in docs
+        ]
         score_info_list = self.emd_model.get_score(
             query, golden_paper_info, batch_size=6
         )
         for doc, sim_score in zip(docs, score_info_list):
+            # 如果都没有，设为空列表
+            # 注意：不能设为 None，因为过滤逻辑可能检查
+            #wsl-710 从原始文档中提取年份和引用数（若存在）
+            year = doc.get("publicationYear") or doc.get("year")
+            citations = doc.get("citationCount") or doc.get("citations")
+            # 提取领域（OpenAlex 通常有 fieldsOfStudy）
+            fields = doc.get("fieldsOfStudy") or doc.get("concepts")
             simple_info = {
                 "arxivId": doc["arxivId"],
                 "paper_id": doc.get("paper_id", doc.get("arxivId")),
                 "sim_score": sim_score,
                 "source": source,
-                "sim_info_details": {
-                    "reason": "calculate sim from beg-m3",
-                    "sim_score": sim_score,
-                },
+                #"sim_info_details": {
+                #    "reason": "calculate sim from beg-m3",
+                #    "sim_score": sim_score,
+                #},
+                # 新增字段
+                "publicationYear": year if year is not None else None,
+                "citationCount": citations if citations is not None else 0,
+                "fieldsOfStudy": fields if fields else [],  # 保持列表形式，缺失则为空列表
             }
             if sim_score >= score_thresh:
                 relevace_docs.append(simple_info)
@@ -1527,7 +1772,7 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
                 irrelevace_docs.append(simple_info)
 
         return relevace_docs, irrelevace_docs
-
+    '''
     def rerank_score_bge(self, query, docs):
         logger.info("rerank_score_bge ...")
 
@@ -1553,49 +1798,107 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
             # logger.info(f"Score: {score}, Title: {doc.get('title', 'N/A')}")
             doc["rerank_score_bge"] = score
             scorted_docs.append(doc)
+        #wsl-77 提取查询中的潜在专有名词（可根据需求自定义）
+        core_terms = [w for w in query.split() if len(w) > 3 and w.lower() not in ['model', 'based', 'learning']]
+        for doc in scorted_docs:
+            title = doc.get('title', '').lower()
+            bonus = 0.0
+            for term in core_terms:
+                if term.lower() in title:
+                    bonus += 0.1
+            doc['rerank_score_bge'] += bonus
+        # 重新按新分数排序
+        scorted_docs.sort(key=lambda x: x['rerank_score_bge'], reverse=True)
 
         return scorted_docs
+    '''
+    #wsl-77在 BGE 向量相似度重排序的基础上，对标题中包含查询核心术语（如模型名、专有名词）的论文给予额外加分
+    def rerank_score_bge(self, query, docs):
+        logger.info("rerank_score_bge ...")
 
-    def _get_bge_embeddings(self, texts, batch_size=16):
-        """通过硅基流动 API 批量获取 BGE-M3 embedding"""
-        if not texts:
-            return []
-        from openai import OpenAI
-        client = OpenAI(
-            api_key=API_KEY,
-            base_url="https://api.siliconflow.cn/v1",
-            timeout=30.0,
+        # ----- 步骤1: 从查询中提取核心术语（保留专有名词、模型名等） -----
+        import re
+        # 定义通用停用词和泛词（避免干扰）
+        stopwords = {
+            'the', 'a', 'an', 'of', 'for', 'on', 'at', 'to', 'in', 'with', 'without',
+            'by', 'and', 'or', 'but', 'from', 'up', 'about', 'into', 'through', 'during',
+            'including', 'etc', 'papers', 'studies', 'work', 'research', 'contribute',
+            'advancement', 'which', 'what', 'how', 'why', 'when', 'where', 'can', 'could',
+            'would', 'should', 'might', 'may', 'does', 'do', 'is', 'are', 'was', 'were',
+            'has', 'have', 'been', 'being', 'will', 'shall', 'need', 'using', 'based'
+        }
+        # 分词并过滤
+        tokens = re.findall(r'\b[a-zA-Z0-9_\-]+\b', query.lower())
+        core_terms = set([t for t in tokens if t not in stopwords and len(t) > 2])
+
+        # 如果查询中有引号内容（如 "Dream to Control"），优先保留
+        quoted = re.findall(r'"([^"]+)"', query)
+        for q in quoted:
+            core_terms.update(q.lower().split())
+
+        # 额外保留包含大写字母的术语（可能是缩写或专有名词），因为原始查询可能没有引号
+        # 这里简单处理：如果原始查询中有大写单词，加入
+        uppercase_terms = re.findall(r'\b([A-Z][A-Za-z0-9_\-]*)\b', query)
+        core_terms.update([t.lower() for t in uppercase_terms if len(t) > 1])
+
+        logger.info(f"Core terms for title bonus: {core_terms}")
+
+        # ----- 构建增强的文档表示（标题重复，摘要保留）-----
+        golden_paper_info = []
+        for doc in docs:
+            title = doc.get("title", "")
+            abstract = doc.get("abstract", "")
+            authors = ";".join([a.get("name", "") for a in doc.get("authors", [])])
+            # 将标题重复两遍，并加上明确字段标签
+            enhanced_text = f"Title: {title}\nTitle: {title}\nAbstract: {abstract}\nAuthors: {authors}"
+            golden_paper_info.append(enhanced_text)
+
+        # ----- 计算 BGE 相似度 -----
+        score_info_list = self.emd_model.get_score(query, golden_paper_info, batch_size=12)
+        assert len(score_info_list) == len(docs)
+
+        # ----- 合并分数并添加标题匹配加分（加大权重）-----
+        scored_docs = []
+        for doc, score in zip(docs, score_info_list):
+            title = doc.get('title', '').lower()
+            bonus = 0.0
+            # 对每个核心术语，出现在标题中加 0.15（原0.1），上限0.5
+            for term in core_terms:
+                if term in title:
+                    bonus += 0.15
+            bonus = min(bonus, 0.5)
+            # 如果摘要也包含核心词，额外加 0.05（但避免过度）
+            abstract = doc.get('abstract', '').lower()
+            for term in core_terms:
+                if term in abstract:
+                    bonus += 0.05
+            bonus = min(bonus, 0.6)  # 总加分不超过0.6
+            total = score + bonus
+            doc['rerank_score_bge'] = total
+            doc['title_match_bonus'] = bonus
+            scored_docs.append(doc)
+
+        # 按总分降序排序
+        scored_docs.sort(key=lambda x: x.get('rerank_score_bge', 0), reverse=True)
+        return scored_docs
+
+    def calculate_similarity(  #wsl-74相似度计算改为bge
+            self, query, docs, search_time="", score_thresh=0.5, source=""
+    ):
+        """
+        使用 BGE 向量相似度替代 LLM 打分，大幅提升速度。
+        """
+        logger.info(f"calculate_similarity (BGE) for {len(docs)} docs, query: {query[:50]}...")
+        # 直接调用已有的 BGE 方法，保持参数兼容
+        return self.calculate_sim_bge(
+            query=query,
+            docs=docs,
+            search_time=search_time,  # calculate_sim_bge 也有该参数，但实际未使用
+            score_thresh=score_thresh,
+            source=source
         )
-        all_embs = []
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i:i+batch_size]
-            for attempt in range(3):
-                try:
-                    resp = client.embeddings.create(
-                        model="BAAI/bge-m3",
-                        input=batch,
-                        encoding_format="float",
-                    )
-                    sorted_data = sorted(resp.data, key=lambda x: x.index)
-                    all_embs.extend([d.embedding for d in sorted_data])
-                    break
-                except Exception as e:
-                    logger.error(f"BGE embedding failed (attempt {attempt+1}): {e}")
-                    time.sleep(2)
-            else:
-                logger.error("BGE embedding failed after 3 attempts")
-                return None
-        return all_embs
-
-    @staticmethod
-    def _cosine_similarity(emb1, emb2):
-        dot = sum(a * b for a, b in zip(emb1, emb2))
-        n1 = sum(a * a for a in emb1) ** 0.5
-        n2 = sum(b * b for b in emb2) ** 0.5
-        return dot / (n1 * n2) if n1 * n2 > 0 else 0.0
-
-    def calculate_similarity(
-        self, query, docs, search_time="", score_thresh=0.6, source=""
+    '''def calculate_similarity(
+        self, query, docs, search_time="", score_thresh=0.5, source=""
     ):
         """
         纯 BGE-M3 embedding 评分（无 LLM）：
@@ -1642,6 +1945,7 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
             f"(threshold={score_thresh}), {time.time()-start:.1f}s"
         )
         return relevace_docs, irrelevace_docs
+        '''
 
     def get_doc_references(self, doc_info):
         try:

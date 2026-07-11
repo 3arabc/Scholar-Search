@@ -12,6 +12,10 @@ from typing import Dict, List, Any
 # Debug mode
 DEBUG = False
 
+#set SILICONFLOW_API_KEY=sk-uejssktdixvxpaorxeonyztxomulwlnxkqmnisonsiffepsn
+#set GOOGLE_SERPER_KEY=28cca99adde1d0a52ecd6b3b481b37f093d499e3
+#set OPENALEX_API_KEY=HVx0tDeogC37dQ10aIPTm5
+#python demo_app_with_front.py
 # =============================================================================
 # OPENAI CONFIGURATION
 # =============================================================================
@@ -51,7 +55,7 @@ LENGTH_GEN_QUERY_FROM_CITATION = 12288
 # WEB API CONFIGURATION
 # =============================================================================
 TRY_COUNT = 4
-LLM_TRY_COUNT = 4
+LLM_TRY_COUNT = 2  #wsl-74重试次数
 LLM_PARALLEL_NUM = 4
 LLM_MODEL_NAME = "deepseek-ai/DeepSeek-V3.2"
 
@@ -59,7 +63,7 @@ LLM_MODEL_NAME = "deepseek-ai/DeepSeek-V3.2"
 API_TRY_COUNT = 4
 API_PARALLEL_REQUEST = 1
 
-SLEEP_TIME_LLM = 2.0
+SLEEP_TIME_LLM = 1.0 #wsl-74重试等待时间
 
 # =============================================================================
 # SEARCH HYPERPARAMETERS
@@ -105,8 +109,29 @@ S2_API_KEY = os.getenv("S2_API_KEY", None)
 RERANK =os.getenv("DO_RERANK",True)
 RERANK = True #wsl-73
 
-KEY_WORDS_NUM =5  # 关键词数量（从2提升到5，扩大搜索覆盖面）
-LLM_PARREL_NUM=4  # 并行LLM评分线程数（已从2提升到4以加速）
+KEY_WORDS_NUM =2
+LLM_PARREL_NUM=4  #wsl-74并发
+#wsl-710
+SIM_THRESHOLD = 0.3
+MAX_DOCS = 200               # 原来可能10，增大到200
+# 重排序条件
+RERANK_SORT_BY = 'year'   # 默认按年份排序
+# 过滤配置
+FILTER_YEAR_START = 2020
+FILTER_YEAR_END = 2025
+FILTER_MIN_CITATIONS = 10
+FILTER_FIELDS = ["Computer Science"]  # 支持多个
+# 是否启用领域过滤（如果 FILTER_FIELDS 为空，即使启用也无效）
+FILTER_ENABLE_FIELDS = True
+
+# 是否启用年份过滤
+FILTER_ENABLE_YEAR = True
+
+# 是否启用引用过滤
+FILTER_ENABLE_CITATIONS = True
+
+# 当文档缺少某字段时的处理方式：True 表示该条件通过（即不因此丢弃），False 表示丢弃
+FILTER_MISSING_FIELD_PASS = False
 # =============================================================================
 # NETWORK CONFIGURATION
 # =============================================================================

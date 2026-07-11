@@ -39,6 +39,9 @@ template_extract_keywords_source_aware = """Extract optimal search keywords from
 - Consider clinical and biomedical contexts
 - Include chemical/drug names or biological processes where relevant
 
+### Key Enhancement:
+- **Actively infer synonyms and related technical terms** that are commonly used in this field, even if they do not appear verbatim in the query. For example, if the query mentions "world model", also include "latent dynamics", "state-space model", "predictive model". Similarly, for any domain, use your knowledge of the field to add relevant alternatives.
+
 ### Examples by Source:
 - Semantic Scholar: [Start] transformer architecture, attention mechanism, language model fine-tuning[End]
 - OpenAlex: [Start] neural networks, deep learning, artificial intelligence, pattern recognition[End]
@@ -51,6 +54,7 @@ template_extract_keywords_source_aware = """Extract optimal search keywords from
 - Output ONLY the keyword list enclosed in [Start] and [End] tags.
 - Do NOT include any explanations, reasoning, or thinking process.
 - Do NOT add any text before or after the tags.
+- **DO NOT generalize**. Keep specific model names, acronyms, and technical terms. Avoid generic terms like "machine learning", "artificial intelligence" unless they are the only terms present.
 
 Now, extract optimized search keywords for {source} from this question:
 {user_query}"""
@@ -155,16 +159,11 @@ Generate {user_input_N} queries optimized for finding SURVEY and REVIEW PAPERS o
    - Historical development surveys
    - Future directions/challenges
 
+3. **Use synonyms and related technical terms** to broaden the search. For example, if the query refers to "world models", also consider "latent dynamics models", "state-space models", "predictive models", "Dreamer", "PlaNet", etc. Include these variations naturally within the queries.
 
-3. Adhere to TIME-SENSITIVITY based on the user_query:
-   - If user_query specifies a particular year or range (e.g., "since 2020", "in 2021", "from 2019-2022", "published after 2018"), incorporate this precise time constraint into the generated queries.
-     - Example for "research since 2022 on X": "Survey of X published since 2022"
-     - Example for "papers on Y in 2021": "Literature review of Y (2021)"
-   - If user_query uses general terms like "recent", "latest", "current research", "newest", refine queries to target the last two years, using {current_year} and {previous_year}.
-     - Example: "Survey of recent advancements in [topic] ({previous_year}-{current_year})"
-   - If no explicit or general time indicators are present in user_query, focus on the topical aspects. Avoid adding default time constraints unless inherently part of the survey type (e.g., a "historical development survey" might imply older literature, while "future directions" implies recent context).
+4. **Time constraints**: DO NOT add any specific year or date range (e.g., "2020-2025") unless the user query explicitly mentions a specific year. For general terms like "recent" or "latest", do not convert them to explicit years – just keep them as "recent" or omit time indicators.
 
-4. Keep queries CONCISE (5-15 words) and directly usable in academic search engines
+5. Keep queries CONCISE (5-15 words) and directly usable in academic search engines.
 
 ### OUTPUT FORMAT:
 Return a JSON object with this exact structure:
@@ -178,6 +177,7 @@ Return a JSON object with this exact structure:
     ...additional queries...
   ]
 }}
+
 """
 
 
@@ -336,10 +336,8 @@ Generate {user_input_N} TECHNICAL and SPECIALIZED search queries that will retri
 2. Include TECHNICAL SPECIFICATIONS relevant to the research question.
 3. Target EMPIRICAL STUDIES and PRIMARY RESEARCH rather than surveys.
 4. Explore different METHODOLOGICAL APPROACHES within {domain}.
-5. Cover distinct SUB-DOMAINS or APPLICATION AREAS.
-6. **Consider TIME-SENSITIVITY**:
-   - If the query includes terms like "recent research" or "latest advancements," prioritize papers from the current year ({current_year}) and the previous year ({previous_year}).
-   - Example: "Recent advancements in [topic] (2024-2025)."
+6. **Use synonyms and related technical terms** to broaden the search. For example, if the query refers to "world models", also consider "latent dynamics models", "state-space models", "predictive models", "Dreamer", "PlaNet", etc. Include these variations naturally within the queries.
+7. **Time constraints**: DO NOT add any specific year or date range (e.g., "2020-2025") unless the user query explicitly mentions a specific year. For general terms like "recent" or "latest", do not convert them to explicit years – just keep them as "recent" or omit time indicators.
 
 ### OUTPUT FORMAT:
 Return a JSON object with this exact structure:
@@ -368,13 +366,28 @@ Output:
 """
 
 
-template_query_fusion_pasa = """Please generate some mutually exclusive queries in a list to search the relevant papers according to the User Query. Searching for survey papers would be better.
+template_query_fusion_pasa = """You are an expert in precise academic paper retrieval. The user needs to find VERY SPECIFIC papers.
+
+### TASK:
+Generate 3-4 HIGHLY SPECIFIC keyword-based search queries based on the User Query.
+
+### CRITICAL RULES (MUST FOLLOW):
+1. **PRESERVE ALL UNIQUE TERMS**: Identify any model names (e.g., "BERT", "GPT", "NeRF", "SAM", "Dreamer"), algorithm names, dataset names, acronyms, and specific methodology names in the query. Keep them exactly as they appear. **DO NOT** replace them with broader categories like "neural networks" or "machine learning".
+2. **NO BROAD TERMS**: Avoid adding generic terms like "deep learning", "artificial intelligence", "survey", "review", "recent advances" unless they are explicitly requested.
+3. **USE KEY PHRASES**: Combine the specific terms into short, tight phrases that mimic how these papers are typically referenced (e.g., "Segment Anything Model", "Attention Is All You Need", "BERT pre-training").
+4. **OUTPUT ONLY JSON**: Return a JSON list of strings.
+
+### EXAMPLES (to illustrate the rule):
+- User Query: "What paper introduced the Segment Anything Model?" → ["Segment Anything Model SAM", "SAM foundation model segmentation", "Segment Anything paper"]
+- User Query: "Which work first used transformers for language?" → ["Attention Is All You Need", "transformer architecture NLP", "original transformer paper"]
+- User Query: "Papers about Dreamer algorithm for RL" → ["Dreamer reinforcement learning", "Dreamer latent imagination", "DreamerV2 model-based RL"]
+- User Query: "Studies on neural radiance fields for view synthesis" → ["NeRF neural radiance fields", "NeRF view synthesis", "NeRF 3D reconstruction"]
+
+Now generate queries for:
 User Query: {user_query}
 
-### **Output Format:**
-```json
-["Query1", "Query2", "QueryN"]
-```
+### Output Format:
+["specific phrase 1", "specific phrase 2", "specific phrase 3"]
 **Output:**"""
 
 template_query_fusion = """Generate a **diverse set of mutually exclusive search queries** to retrieve **survey or review papers** relevant to the following **User Query:**
