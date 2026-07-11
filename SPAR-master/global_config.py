@@ -27,14 +27,15 @@ ENDPOINT = os.getenv(
     "SILICONFLOW_BASE_URL",
     "https://api.siliconflow.cn/v1/chat/completions",
 )
-DEPLOYMENT_NAME = "Qwen3-8B"
+DEPLOYMENT_NAME = "deepseek-ai/DeepSeek-V3.2"
 
 # =============================================================================
 # PIPELINE CONFIGURATION
 # =============================================================================
 
-# wsl-73精准过滤配置
-ENABLE_LLM_RERANK = False       # 是否启用 LLM 二次过滤
+# 二次筛选（已关闭：与第一阶段评分重复，且串行评分耗时巨大）
+ENABLE_LLM_RERANK = False        # 关闭 LLM 二次过滤
+LLM_RERANK_THRESHOLD = 0.7      # 保留分数阈值
 
 SAVE_ID2DOCS = True
 RELEVANCE_SCORE = 0.5
@@ -56,7 +57,7 @@ LENGTH_GEN_QUERY_FROM_CITATION = 12288
 TRY_COUNT = 4
 LLM_TRY_COUNT = 2  #wsl-74重试次数
 LLM_PARALLEL_NUM = 4
-LLM_MODEL_NAME = "Qwen3-8B"  # "Qwen3-8B"
+LLM_MODEL_NAME = "deepseek-ai/DeepSeek-V3.2"
 
 
 API_TRY_COUNT = 4
@@ -71,19 +72,23 @@ DO_FUSION_JUDGE = True
 FUSION_TEMPLATE = "AUTOMATIC"  # Options: "WITHEXPLAIN", "AUTOMATIC"
 
 # Query processing settings
-QUERY_NUM_PRUNED = 4  #wsl-71 Number of queries to use for search
+QUERY_NUM_PRUNED = 8  # 每层保留的扩展查询数（增大以覆盖更多方向）
 RETRIEVAL_QUERY_BATCH_SIZE = 6  # Batch size for query processing to avoid excessive searching
 
 # Document processing settings
-DOCS_TO_EXPAND = 40
-REFERENCE_DOC_PRUNED = 40  #wsl-71 Number of references to extract from each relevant document
+DOCS_TO_EXPAND = 60  # 引用搜索的文档数（增大以覆盖更多引用）
+REFERENCE_DOC_PRUNED = 40  # 每篇文档提取的参考文献数
 REFERENCE_OCCUR_FREQUENCY = 0.6
-REFERENCE_DOC_NUM_TO_GEN_NEW_QUERY = 10  #wsl-71 Number of reference docs used to generate new queries
+REFERENCE_DOC_NUM_TO_GEN_NEW_QUERY = 15  # 用于生成新查询的文档数（增大以丰富上下文）
 
-# Similarity thresholds #wsl-71相似度阈值，影响大 #0.6，0.5
-REFERENCE_DOC_SIM_THRESHOLD = 0.4
-BEGIN_SIM_THRESHOLD = 0.3
-PASS_SIM_THRESHOLD = 0.3
+# 引用搜索配置
+DO_REFERENCE_SEARCH = True  # 启用引用搜索，从相关论文的参考文献中发现更多论文
+
+# Similarity thresholds（已恢复原版0.5，减少低质量文档进入后续环节）
+REFERENCE_DOC_SIM_THRESHOLD = 0.5
+BEGIN_SIM_THRESHOLD = 0.5
+PASS_SIM_THRESHOLD = 0.5
+REFERENCE_EXPAND_THRESHOLD = 0.7  # 引用扩展门槛：仅 sim_score ≥ 此值的论文才取其参考文献
 
 # Search routes configuration
 SEARCH_ROUTES: List[str] = ["arxiv", "openalex"]
@@ -100,7 +105,7 @@ S2_API_KEY = os.getenv("S2_API_KEY", None)
 # =============================================================================
 # SEARCH FEATURES
 # =============================================================================
-DO_REFERENCE_SEARCH = False  # Toggle reference-based search
+# RERANK feature toggle
 RERANK =os.getenv("DO_RERANK",True)
 RERANK = True #wsl-73
 
@@ -148,7 +153,7 @@ ARXIV_CLIENT = arxiv.Client(delay_seconds=0.05)
 # RERANKING CONFIGURATION
 # =============================================================================
 ENABLE_RERANK = False
-RERANK_MODEL = "Qwen3-8B"
+RERANK_MODEL = "deepseek-ai/DeepSeek-V3.2"  # 与主模型一致
 
 # =============================================================================
 # CONFIGURATION VALIDATION

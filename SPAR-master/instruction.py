@@ -1009,7 +1009,7 @@ Ensure the generated queries are high-quality, relevant, and diverse, strictly f
 """
 
 template_sim_between_query_doc_v2_inst = """### **Task:**
-Evaluate whether the provided academic document (**Doc**) sufficiently satisfies the **scholarly paper search demand** of the **UserQuery**. The evaluation should consider **explicit and implicit relevance factors**, including **topic alignment, contextual meaning, depth of information**.
+Evaluate whether the provided academic document (**Doc**) sufficiently satisfies the **scholarly paper search demand** of the **UserQuery**. You MUST be strict and discriminative — most papers are only partially relevant at best.
 
 ---
 
@@ -1026,14 +1026,56 @@ Evaluate whether the provided academic document (**Doc**) sufficiently satisfies
 ---
 
 ### **Evaluation Criteria & Scoring (0-5 Scale):**
-1. **Topic Match:** Does the document **explicitly** address the subject of the query? Consider keyword overlap, research area similarity, and whether the **core theme** aligns with the query.
-2. **Contextual Relevance:** Does the document explore the **specific intent** or implicit aspects of the query?
-3. **Depth & Completeness:** Does the document provide **in-depth analysis**, experimental results, or theoretical discussions that comprehensively address the query topic?
 
----
+For each dimension, use the following anchor definitions:
+
+**1. Topic Match — Does the core topic align with the query?**
+  - 5: Title or abstract uses the SAME key technical terms as the query
+  - 4: Topic is directly in the same sub-area, closely related terminology
+  - 3: Topic is in the broader field but not the specific sub-area
+  - 2: Only peripherally related (shares some high-level concepts)
+  - 1: Completely different research topic
+
+**2. Contextual Relevance — Does it address the specific intent of the query?**
+  - 5: Directly answers the query's research question or fills the gap described
+  - 4: Addresses the same intent from a related angle
+  - 3: Related but addresses a different aspect than what the query asks
+  - 2: Mentions the general area but does not engage with the query's intent
+  - 1: No connection to the query's intent
+
+**3. Depth & Completeness — Is the treatment thorough enough?**
+  - 5: Full experimental results, rigorous evaluation, substantial theoretical contribution
+  - 4: Solid methodology with meaningful analysis
+  - 3: Preliminary results, limited evaluation, or primarily a position/opinion piece
+  - 2: Brief mention, no experiments or substantial analysis
+  - 1: Abstract only, no substantive content
+
+**Important:** Score STRICTLY. A score of 4 or 5 should be rare — most retrieved papers will score 1-3 on most dimensions.
 """
 
 template_sim_between_query_doc_v2_example = """
+### **Example:**
+
+**UserQuery:** "Transformer architectures for efficient long-document processing"
+
+**Document:**
+- Title: Longformer: The Long-Document Transformer
+- Abstract: We introduce Longformer, a modified Transformer architecture for processing long documents, with a sliding window attention pattern that scales linearly with sequence length...
+- Publication Year: 2020
+
+**Correct Output:**
+```json
+{
+  "topic_match": 5,
+  "contextual_relevance": 5,
+  "depth_completeness": 4,
+  "final_decision": "Relevant",
+  "justification": "Directly addresses efficient Transformer for long documents, with novel attention mechanism and thorough evaluation."
+}
+```
+
+---
+
 ### **Output Format (Structured JSON):**
 ```json
 {
