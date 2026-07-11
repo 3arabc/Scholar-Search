@@ -1064,7 +1064,7 @@ def search_paper_from_arxiv_by_arxiv_id_bsz(arxiv_ids, max_retries=3):
             try:
                 results = list(ARXIV_CLIENT.results(search))
                 for result in results:
-                    logger.info(f"Arxiv success paper: {result.title}")
+                    logger.debug(f"Arxiv success paper: {result.title}")
             except arxiv.HTTPError as e:
                 logger.error(f"Arxiv HTTP Error: {e}")
 

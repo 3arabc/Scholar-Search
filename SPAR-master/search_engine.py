@@ -75,7 +75,7 @@ class MultiSearchAgent:
         model_inp = template_extract_keywords_source_aware.format(
             user_query=query, source=source
         )
-        for _ in range(1):
+        for _ in range(4):
             try:
                 response = get_from_llm(model_inp, model_name=LLM_MODEL_NAME)
                 pattern = r"\[Start\](.*?)\[End\]"
@@ -86,9 +86,7 @@ class MultiSearchAgent:
                     return [kw.strip() for kw in keywords.split(",") if kw.strip()][:KEY_WORDS_NUM]
             except:
                 logger.error(f"Failed to extract keywords: {traceback.format_exc()}")
-        #return []
-        logger.warning(f"Keyword extraction failed, using original query as keyword: {query}") #wsl-72，无延申词可以使用原关键词搜索
-        return [query]
+        return []  # 提取失败返回空，避免用自然语言查询去搜API
 
     def _google_arxiv_search(
         self,
@@ -111,7 +109,7 @@ class MultiSearchAgent:
             ) as executor:
                 future_to_query = {
                     executor.submit(
-                        google_search_arxiv_id, query, API_TRY_COUNT, 15, end_date
+                        google_search_arxiv_id, query, API_TRY_COUNT, 50, end_date
                     ): query
                     for query in queries
                 }
@@ -125,7 +123,7 @@ class MultiSearchAgent:
                         )
                         results[query] = []
 
-            logger.info(f"google_search_arxiv_id results: {results}")
+            logger.debug(f"google_search_arxiv_id results: {results}")
 
             # Step 2: 去重 arxiv_ids
             unique_arxiv: Set[str] = set()
@@ -187,7 +185,7 @@ class MultiSearchAgent:
         """Execute OpenAlex search."""
         logger.info(f"Searching OpenAlex for '{keyword}'")
         try:
-            papers = search_paper_via_query_from_openalex(keyword, per_page=10)
+            papers = search_paper_via_query_from_openalex(keyword, per_page=20)
             logger.info(f"Found {len(papers)} papers for '{keyword}' from OpenAlex")
             return SearchResult(
                 source="openalex", papers=papers, keyword=keyword, raw_query=raw_query
@@ -267,7 +265,7 @@ class MultiSearchAgent:
             logger.info(f"[{source}]: Merging results for raw_query: {raw_query}")
             for result in group:
                 if not result.papers:
-                    logger.info(f"No papers found in this result: {result}, skipping")
+                    logger.debug(f"No papers found in this result: {result}, skipping")
                     continue
 
                 if raw_query not in merged_query2paper:
@@ -297,7 +295,7 @@ class MultiSearchAgent:
 
         for result in results:
             if not result.papers:
-                logger.info(f"No papers found in this result: {result}, skipping")
+                logger.debug(f"No papers found in this result: {result}, skipping")
                 continue
             keyword = result.keyword
             raw_query = result.raw_query
@@ -469,7 +467,7 @@ class MultiSearchAgent:
                     merged_results[source] = self._merge_search_results_grouped(
                         results_by_source[source], source
                     )
-        logger.info(f"merged_results: {merged_results}")
+        logger.debug(f"merged_results: {merged_results}")
 
         # Step 5: Merge results from all sources
         final_papers = {}
@@ -478,7 +476,7 @@ class MultiSearchAgent:
         query_keywords2raw = {}
         for source, result in merged_results.items():
             if not result.query2paper:
-                logger.info(f"result is empty, skip: {result}")
+                logger.debug(f"result is empty, skip: {result}")
                 continue
             if source == "arxiv" and result.query2paper:
                 # For Google/ArXiv results which already track query->paper relationships
@@ -500,7 +498,7 @@ class MultiSearchAgent:
 
             else:
                 for query, papers in result.query2paper.items():
-                    logger.info(f"papers: {len(papers)}: {papers[0]}")
+                    logger.debug(f"papers: {len(papers)}: {papers[0]}")
 
                     query_extracted_keywords = result.extra.get(
                         "merged_query_to_keywords", {}
@@ -561,12 +559,12 @@ def _generate_query_from_reference(
         doc_field=one_doc.get("fieldsOfStudy", ""),
     )
 
-    logger.info(f"_generate_query_from_reference model info: {model_inp}")
+    logger.debug(f"_generate_query_from_reference model info: {model_inp}")
 
     for _ in range(LLM_TRY_COUNT):
         try:
             response = get_from_llm(model_inp, model_name=LLM_MODEL_NAME)
-            logger.info(f"response: {response}")
+            logger.debug(f"response: {response}")
             response = fetch_string(response)
             query_list = extract_json(response)
             if query_list is None:
@@ -769,7 +767,7 @@ class AcademicTreeSearchEngine:
                                         4096,
                                         model_name=LLM_MODEL_NAME)
                 response = fetch_string(response)
-                logger.info(f"query correct response: {response}")
+                logger.debug(f"query correct response: {response}")
                 response_new = extract_json(response)
                 if response_new is None:
                     logger.warning("Failed to parse JSON, using defaults")
@@ -1032,12 +1030,12 @@ class AcademicTreeSearchEngine:
             best_response = None
             best_query_count = 0
 
-            logger.info(f"Expand query prompt for LLM: {prompt}")
+            logger.debug(f"Expand query prompt for LLM: {prompt}")
             for attempt in range(LLM_TRY_COUNT):
                 try:
                     response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
                     response = fetch_string(response)
-                    logger.info(f"Expanded queries response: {response}")
+                    logger.debug(f"Expanded queries response: {response}")
 
                     # Parse the response based on its format
                     try:
@@ -1085,7 +1083,7 @@ class AcademicTreeSearchEngine:
                     expanded_queries = self._extract_queries_from_response(
                         parsed_response, prompt_type
                     )
-                    logger.info(f"Extracted queries: {expanded_queries}")
+                    logger.debug(f"Extracted queries: {expanded_queries}")
 
                     if expanded_queries:
                         # Track best response by number of queries
@@ -1422,7 +1420,7 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
                     logger.error(f"Search failed for query {query}: {str(e)}")
                     results[query] = []
 
-        logger.info(f"google_search_arxiv_id: {results}")
+        logger.debug(f"google_search_arxiv_id: {results}")
 
         unique_arxiv = set()
         original_arxiv = []
@@ -1558,48 +1556,91 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
 
         return scorted_docs
 
-    def calculate_similarity(
-        self, query, docs, search_time="", score_thresh=0.5, source=""
-    ):
-        logger.debug(f"calculate_similarity, query: {query}; doc is: {docs[0].keys()}")
-        relevace_docs = []
-        irrelevace_docs = []
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=LLM_PARREL_NUM
-        ) as executor:
-            future_to_doc = {
-                executor.submit(
-                    _calculate_similarity_with_retry, query, search_time, doc
-                ): doc
-                for doc in docs
-            }
-            for future in concurrent.futures.as_completed(future_to_doc):
-                doc = future_to_doc[future]
-                res = future.result(timeout=2)
+    def _get_bge_embeddings(self, texts, batch_size=16):
+        """通过硅基流动 API 批量获取 BGE-M3 embedding"""
+        if not texts:
+            return []
+        from openai import OpenAI
+        client = OpenAI(
+            api_key=API_KEY,
+            base_url="https://api.siliconflow.cn/v1",
+            timeout=30.0,
+        )
+        all_embs = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i:i+batch_size]
+            for attempt in range(3):
                 try:
-                    if res:
-                        doc.update(res)
-                    else:
-                        print(traceback.format_exc())
-                        doc["sim_score"] = -1  # 失败则设为0，这个数据就不要了
-                        doc["sim_info_details"] = {}
-                except:
-                    print(traceback.format_exc())
-                    doc["sim_score"] = -1  # 失败则设为0，这个数据就不要了
-                    doc["sim_info_details"] = {}
-                finally:
-                    simple_info = {
-                        "arxivId": doc["arxivId"],
-                        "paper_id": doc.get("paper_id", doc.get("arxivId")),
-                        "sim_score": doc["sim_score"],
-                        "sim_info_details": doc["sim_info_details"],
-                        "source": source,
-                    }
-                    if doc["sim_score"] >= score_thresh:
-                        relevace_docs.append(simple_info)
-                    else:
-                        irrelevace_docs.append(simple_info)
+                    resp = client.embeddings.create(
+                        model="BAAI/bge-m3",
+                        input=batch,
+                        encoding_format="float",
+                    )
+                    sorted_data = sorted(resp.data, key=lambda x: x.index)
+                    all_embs.extend([d.embedding for d in sorted_data])
+                    break
+                except Exception as e:
+                    logger.error(f"BGE embedding failed (attempt {attempt+1}): {e}")
+                    time.sleep(2)
+            else:
+                logger.error("BGE embedding failed after 3 attempts")
+                return None
+        return all_embs
 
+    @staticmethod
+    def _cosine_similarity(emb1, emb2):
+        dot = sum(a * b for a, b in zip(emb1, emb2))
+        n1 = sum(a * a for a in emb1) ** 0.5
+        n2 = sum(b * b for b in emb2) ** 0.5
+        return dot / (n1 * n2) if n1 * n2 > 0 else 0.0
+
+    def calculate_similarity(
+        self, query, docs, search_time="", score_thresh=0.6, source=""
+    ):
+        """
+        纯 BGE-M3 embedding 评分（无 LLM）：
+        余弦相似度直接作为 sim_score，>= score_thresh 为相关。
+        """
+        if not docs:
+            return [], []
+
+        doc_texts = [
+            f"Title: {d.get('title', '')}\nAbstract: {d.get('abstract', '')}"
+            for d in docs
+        ]
+
+        start = time.time()
+        q_emb = self._get_bge_embeddings([query])
+        d_embs = self._get_bge_embeddings(doc_texts) if doc_texts else None
+
+        if not q_emb or not d_embs:
+            logger.error("BGE embedding failed, all docs treated as irrelevant")
+            irrelevace_docs = [{
+                "arxivId": d["arxivId"],
+                "paper_id": d.get("paper_id", d.get("arxivId")),
+                "sim_score": 0.0, "source": source,
+                "sim_info_details": {"reason": "BGE embedding failed"},
+            } for d in docs]
+            return [], irrelevace_docs
+
+        qv = q_emb[0]
+        relevace_docs, irrelevace_docs = [], []
+
+        for d, de in zip(docs, d_embs):
+            sim = self._cosine_similarity(qv, de)
+            info = {
+                "arxivId": d["arxivId"],
+                "paper_id": d.get("paper_id", d.get("arxivId")),
+                "sim_score": sim,
+                "source": source,
+                "sim_info_details": {"bge_score": sim, "method": "BGE-M3 cosine"},
+            }
+            (relevace_docs if sim >= score_thresh else irrelevace_docs).append(info)
+
+        logger.info(
+            f"BGE pure scoring: {len(docs)} docs -> {len(relevace_docs)} relevant "
+            f"(threshold={score_thresh}), {time.time()-start:.1f}s"
+        )
         return relevace_docs, irrelevace_docs
 
     def get_doc_references(self, doc_info):

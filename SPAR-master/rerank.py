@@ -53,7 +53,7 @@ class Reranker(object):
         # Prepare prompt for LLM reranking
         prompt = self._prepare_reranking_prompt(top_docs, time_constraints)
 
-        logger.info(f"prompt: {prompt}")
+        logger.debug(f"prompt: {prompt}")
         try:
             # Use LLM to rerank documents
             reranked_results = self.llm_rerank_documents(prompt)
@@ -128,15 +128,12 @@ class Reranker(object):
                 prompt += f"   - The query asks for papers {time_constraints['specific_timeframe']}, so prefer papers within this timeframe\n"
         #else:
         #    prompt += "   - Generally prefer more recent papers, but don't overly penalize influential older papers\n"
-        else:  #wsl改-时效性
-            prompt += "   - Since this is an academic literature search, strongly favor papers published in the last 3 years unless an older paper is exceptionally foundational (e.g., cited > 5000 times).\n"
+        else:  #wsl改-时效性（已还原为原版温和表述）
+            prompt += "   - Generally prefer more recent papers, but don't overly penalize influential older papers\n"
 
 
         prompt += (
-            "3. Reproducibility & Open Science:\n" #wsl改-复现性
-            "   - Strongly prefer papers that provide open-source code, publicly available datasets, or detailed experimental setups.\n"
-            "   - If a paper lacks code or data, penalize it unless it is a purely theoretical breakthrough.\n"
-            "4. Maintain reasonable relevance to the original query\n\n"
+            "3. Maintain reasonable relevance to the original query\n\n"
             "For each paper, provide:\n"
             "1. A new numerical rank (1 being the highest)\n"
             "2. A brief justification (1-2 sentences)\n"
@@ -180,20 +177,20 @@ class Reranker(object):
 
         Returns a list of dictionaries containing reranked documents information.
         """
-        logger.info(f"llm_rerank_documents: {prompt}")
+        logger.debug(f"llm_rerank_documents: {prompt}")
         max_retries = 10
         retry_count = 0
 
         while retry_count < max_retries:
             try:
                 response = get_from_llm(prompt, model_name=RERANK_MODEL)
-                logger.info(f"response: {response}")
+                logger.debug(f"response: {response}")
                 # Parse the LLM response to extract reranking information
                 reranked_results = self._parse_llm_reranking_response(response)
 
                 # If we got valid results, return them
                 if reranked_results:
-                    logger.info(f"reranked_results: {reranked_results}")
+                    logger.debug(f"reranked_results: {reranked_results}")
                     return reranked_results
 
                 # Otherwise, retry
