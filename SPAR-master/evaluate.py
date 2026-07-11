@@ -192,6 +192,16 @@ def load_benchmark(benchmark_name: str, sample_num: int = None) -> List[dict]:
                     if pid:
                         extracted = extract_arxiv_id(pid)
                         answer_ids.add(extracted if extracted else pid)
+                    #wsl-76 新增：提取 OpenAlex ID
+                    oa_id = a.get("openalex_id")
+                    if oa_id:
+                        answer_ids.add(str(oa_id))
+                    else:
+                        oa_url = a.get("openAlexUrl", "")
+                        if oa_url:
+                            match = re.search(r"/(W\d+)$", oa_url)
+                            if match:
+                                answer_ids.add(match.group(1))
                     # 补充：从 URL 提取
                     if not pid:
                         for k in ("url", "openAlexUrl", "semanticUrl"):
@@ -502,7 +512,22 @@ def run_search_and_evaluate(
         # 提取预测结果
         all_docs, pred_ids = extract_predicted_ids(result_data)
         pred_titles = [d.get("title", "") for d in all_docs if d.get("title")]
-
+        #wsl-76 ---- 插入过滤代码 ----
+        threshold = 0.4  # 可以调低，因为重排序后的分数可能更分散
+        filtered_pred_ids = set()
+        filtered_pred_titles = []
+        for doc in all_docs:
+            # 优先使用 rerank_score_bge，若不存在则用 sim_score
+            score = doc.get("rerank_score_bge", doc.get("sim_score", 0.0))
+            if score >= threshold:
+                doc_id = doc.get("paper_id", "")
+                if doc_id:
+                    filtered_pred_ids.add(doc_id)
+                    title = doc.get("title", "")
+                    if title:
+                        filtered_pred_titles.append(title)
+        pred_ids = filtered_pred_ids
+        pred_titles = filtered_pred_titles
         # 评估
         eval_result = evaluate_query(
             pred_ids=pred_ids,
@@ -580,6 +605,23 @@ def evaluate_existing_results(
         matched += 1
         all_docs, pred_ids = extract_predicted_ids(result_data)
         pred_titles = [d.get("title", "") for d in all_docs if d.get("title")]
+
+        #wsl-76 ---- 插入过滤代码 ----
+        threshold = 0.4  # 可以调低，因为重排序后的分数可能更分散
+        filtered_pred_ids = set()
+        filtered_pred_titles = []
+        for doc in all_docs:
+            # 优先使用 rerank_score_bge，若不存在则用 sim_score
+            score = doc.get("rerank_score_bge", doc.get("sim_score", 0.0))
+            if score >= threshold:
+                doc_id = doc.get("paper_id", "")
+                if doc_id:
+                    filtered_pred_ids.add(doc_id)
+                    title = doc.get("title", "")
+                    if title:
+                        filtered_pred_titles.append(title)
+        pred_ids = filtered_pred_ids
+        pred_titles = filtered_pred_titles
 
         eval_result = evaluate_query(
             pred_ids=pred_ids,

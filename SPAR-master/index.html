@@ -583,7 +583,42 @@
                     </div>
                 </div>
             </div>
-
+            <!-- wsl-711筛选条件区域 -->
+            <div class="form-group" style="border-top: 2px solid #e5e7eb; padding-top: 20px; margin-top: 20px;">
+                <label style="font-weight: 600; color: #374151; display: block; margin-bottom: 10px;">🔍 筛选条件（可选）</label>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                    <div>
+                        <label for="filterYearStart">起始年份</label>
+                        <input type="number" id="filterYearStart" name="filter_year_start" placeholder="如 2015" min="1900" max="2100">
+                    </div>
+                    <div>
+                        <label for="filterYearEnd">结束年份</label>
+                        <input type="number" id="filterYearEnd" name="filter_year_end" placeholder="如 2025" min="1900" max="2100">
+                    </div>
+                    <div>
+                        <label for="filterMinCitations">最少引用数</label>
+                        <input type="number" id="filterMinCitations" name="filter_min_citations" placeholder="如 10" min="0">
+                    </div>
+                    <div>
+                        <label for="filterFields">研究领域（逗号分隔）</label>
+                        <input type="text" id="filterFields" name="filter_fields" placeholder="如 Computer Science, AI">
+                    </div>
+                </div>
+                <div class="help-text" style="margin-top: 8px; font-size: 13px; color: #6b7280;">
+                    留空表示不限制该条件。领域支持多个，用英文逗号分隔。
+                </div>
+            </div>
+            <div class="form-group" style="border-top: 2px solid #e5e7eb; padding-top: 20px; margin-top: 20px;">
+                <label style="font-weight: 600; color: #374151; display: block; margin-bottom: 10px;">⚙️ 排序依据</label>
+                <div>
+                    <select id="sortBy" name="sort_by" style="width: 100%; padding: 10px; border: 2px solid #e5e7eb; border-radius: 8px; font-size: 16px;">
+                        <option value="year">📅 出版年份（最新优先）</option>
+                        <option value="citations">📊 引用数（最多优先）</option>
+                        <option value="similarity">🎯 相似度（最高优先）</option>
+                    </select>
+                    <div class="help-text" style="margin-top: 5px;">选择搜索结果排序的主要依据。</div>
+                </div>
+            </div>
             <button type="submit" class="search-btn" id="searchBtn">
                 🔍 Search Papers
             </button>
@@ -739,7 +774,23 @@
                 searchData.end_date = formData.get('end_date') || '';
                 searchData.max_workers = parseInt(formData.get('max_workers'));
                 searchData.batch_size = parseInt(formData.get('batch_size'));
+
+
             }
+            // 获取筛选参数
+            const filterYearStart = document.getElementById('filterYearStart')?.value;
+            const filterYearEnd = document.getElementById('filterYearEnd')?.value;
+            const filterMinCitations = document.getElementById('filterMinCitations')?.value;
+            const filterFields = document.getElementById('filterFields')?.value;
+
+            const sortBy = document.getElementById('sortBy')?.value || 'year';
+            // 添加到 searchData
+            searchData.filter_year_start = filterYearStart ? parseInt(filterYearStart) : null;
+            searchData.filter_year_end = filterYearEnd ? parseInt(filterYearEnd) : null;
+            searchData.filter_min_citations = filterMinCitations ? parseInt(filterMinCitations) : null;
+            searchData.filter_fields = filterFields ? filterFields.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+            searchData.sort_by = sortBy;
 
             // Show loading - 验证元素存在
             console.log('🔄 Starting to show loading state...');

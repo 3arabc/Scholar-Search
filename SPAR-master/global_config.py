@@ -12,6 +12,10 @@ from typing import Dict, List, Any
 # Debug mode
 DEBUG = False
 
+#set SILICONFLOW_API_KEY=sk-uejssktdixvxpaorxeonyztxomulwlnxkqmnisonsiffepsn
+#set GOOGLE_SERPER_KEY=28cca99adde1d0a52ecd6b3b481b37f093d499e3
+#set OPENALEX_API_KEY=HVx0tDeogC37dQ10aIPTm5
+#python demo_app_with_front.py
 # =============================================================================
 # OPENAI CONFIGURATION
 # =============================================================================
@@ -23,15 +27,14 @@ ENDPOINT = os.getenv(
     "SILICONFLOW_BASE_URL",
     "https://api.siliconflow.cn/v1/chat/completions",
 )
-DEPLOYMENT_NAME = "Qwen3-30B-Instruct"
+DEPLOYMENT_NAME = "Qwen3-8B"
 
 # =============================================================================
 # PIPELINE CONFIGURATION
 # =============================================================================
 
 # wsl-73精准过滤配置
-ENABLE_LLM_RERANK = True        # 是否启用 LLM 二次过滤
-LLM_RERANK_THRESHOLD = 0.7      # 保留分数阈值
+ENABLE_LLM_RERANK = False       # 是否启用 LLM 二次过滤
 
 SAVE_ID2DOCS = True
 RELEVANCE_SCORE = 0.5
@@ -51,15 +54,15 @@ LENGTH_GEN_QUERY_FROM_CITATION = 12288
 # WEB API CONFIGURATION
 # =============================================================================
 TRY_COUNT = 4
-LLM_TRY_COUNT = 4
+LLM_TRY_COUNT = 2  #wsl-74重试次数
 LLM_PARALLEL_NUM = 4
-LLM_MODEL_NAME = "Qwen3-30B-Instruct"  # "Qwen3-8B"
+LLM_MODEL_NAME = "Qwen3-8B"  # "Qwen3-8B"
 
 
 API_TRY_COUNT = 4
 API_PARALLEL_REQUEST = 1
 
-SLEEP_TIME_LLM = 2.0
+SLEEP_TIME_LLM = 1.0 #wsl-74重试等待时间
 
 # =============================================================================
 # SEARCH HYPERPARAMETERS
@@ -102,7 +105,28 @@ RERANK =os.getenv("DO_RERANK",True)
 RERANK = True #wsl-73
 
 KEY_WORDS_NUM =2
-LLM_PARREL_NUM=2
+LLM_PARREL_NUM=4  #wsl-74并发
+#wsl-710
+SIM_THRESHOLD = 0.3
+MAX_DOCS = 200               # 原来可能10，增大到200
+# 重排序条件
+RERANK_SORT_BY = 'year'   # 默认按年份排序
+# 过滤配置
+FILTER_YEAR_START = 2020
+FILTER_YEAR_END = 2025
+FILTER_MIN_CITATIONS = 10
+FILTER_FIELDS = ["Computer Science"]  # 支持多个
+# 是否启用领域过滤（如果 FILTER_FIELDS 为空，即使启用也无效）
+FILTER_ENABLE_FIELDS = True
+
+# 是否启用年份过滤
+FILTER_ENABLE_YEAR = True
+
+# 是否启用引用过滤
+FILTER_ENABLE_CITATIONS = True
+
+# 当文档缺少某字段时的处理方式：True 表示该条件通过（即不因此丢弃），False 表示丢弃
+FILTER_MISSING_FIELD_PASS = False
 # =============================================================================
 # NETWORK CONFIGURATION
 # =============================================================================

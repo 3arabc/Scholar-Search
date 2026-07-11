@@ -13,7 +13,7 @@ import traceback
 from typing import List, Dict, Any, Optional, Union
 from func_timeout import func_set_timeout
 from requests.adapters import HTTPAdapter
-from requests.packages.urllib3.util.retry import Retry
+from urllib3.util.retry import Retry
 from dataclasses import dataclass
 from cachetools import TTLCache, cachedmethod
 import operator
@@ -79,12 +79,12 @@ MODEL_CONFIGS = {
         top_p=0.8,
         top_k=20,
         min_p=0,
-        timeout=120,
+        timeout=180,
         openai_client=OpenAI(
             api_key=os.getenv("SILICONFLOW_API_KEY", "your_api_key_here"),
             base_url="https://api.siliconflow.cn/v1",
-            timeout=120.0,
-            max_retries=2,
+            timeout=180.0,
+            max_retries=1,
         ),
     ),
     "Qwen3-30B-Instruct": ModelConfig(
@@ -130,7 +130,7 @@ MODEL_CONFIGS = {
         openai_client=OpenAI(
             api_key=os.getenv("SILICONFLOW_API_KEY", "your_api_key_here"),
             base_url="https://api.siliconflow.cn/v1",
-            timeout=300.0,
+            timeout=400.0,
             max_retries=3,
             # 如果需要代理，取消注释并修改端口
             # http_client=httpx.Client(proxies="http://127.0.0.1:7890")
@@ -251,7 +251,7 @@ class LLMClient:
 client = LLMClient()
 
 
-@func_set_timeout(200)
+@func_set_timeout(400) #wsl-74
 def get_from_llm(
     messages: Union[str, List[Dict[str, str]]], model_name: str = "Qwen25-7B", **kwargs
 ) -> Optional[str]:
