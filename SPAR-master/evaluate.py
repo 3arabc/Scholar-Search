@@ -25,6 +25,9 @@ from difflib import SequenceMatcher
 import numpy as np
 import pandas as pd
 
+from global_config import SEARCH_ROUTES, LLM_MODEL_NAME
+from pipeline_spar import AcademicSearchTree
+from utils import get_md5
 # ========== 项目模块导入 ==========
 try:
     from tqdm import tqdm
@@ -144,7 +147,7 @@ def load_benchmark(benchmark_name: str, sample_num: int = None) -> List[dict]:
     """
     加载 benchmark 数据集。
     支持 AutoScholarQuery 和 OwnBenchmark。
-    返回 list[dict]，每个 dict 包含 question, answer_titles, answer_ids, qid
+    返回 list[dict]，每个 dict 包含 question, answer_titles, answer_ids, gold_id_to_title, qid
     """
     base_dir = os.path.dirname(os.path.abspath(__file__))
     benchmark_dir = os.path.join(base_dir, "benchmark")
@@ -170,29 +173,31 @@ def load_benchmark(benchmark_name: str, sample_num: int = None) -> List[dict]:
             question = data.get("question", data.get("query", ""))
             answer_titles = []
             answer_ids = set()
+            gold_id_to_title = {}  # 新增：gold ID → gold title 的映射
 
             if benchmark_name == "AutoScholarQuery":
-                # 格式: answer (标题列表), answer_arxiv_id (ID列表)
                 answer_titles = data.get("answer", [])
                 raw_ids = data.get("answer_arxiv_id", [])
                 for aid in raw_ids:
                     aid = str(aid).strip()
                     if aid:
-                        # 标准化 arxiv ID
                         extracted = extract_arxiv_id(aid)
-                        answer_ids.add(extracted if extracted else aid)
+                        clean_id = extracted if extracted else aid
+                        answer_ids.add(clean_id)
                 qid = data.get("qid", f"q_{len(records)}")
 
             else:  # OwnBenchmark / spar_bench
-                # 格式: answer (标题列表), source_meta.answers (详细列表)
                 answer_titles = data.get("answer", [])
                 answers_meta = data.get("source_meta", {}).get("answers", [])
-                for a in answers_meta:
+                for i, a in enumerate(answers_meta):
                     pid = a.get("paperID", "")
                     if pid:
                         extracted = extract_arxiv_id(pid)
-                        answer_ids.add(extracted if extracted else pid)
-                    # 补充：从 URL 提取
+                        clean_id = extracted if extracted else pid
+                        answer_ids.add(clean_id)
+                        # 建立 gold_id → gold_title 映射
+                        if i < len(answer_titles):
+                            gold_id_to_title[clean_id] = answer_titles[i]
                     if not pid:
                         for k in ("url", "openAlexUrl", "semanticUrl"):
                             v = a.get(k, "")
@@ -200,12 +205,15 @@ def load_benchmark(benchmark_name: str, sample_num: int = None) -> List[dict]:
                                 extracted = extract_arxiv_id(v)
                                 if extracted:
                                     answer_ids.add(extracted)
+                                    if i < len(answer_titles):
+                                        gold_id_to_title[extracted] = answer_titles[i]
                 qid = data.get("qid", f"q_{len(records)}")
 
             records.append({
                 "question": question,
                 "answer_titles": answer_titles,
                 "answer_ids": answer_ids,
+                "gold_id_to_title": gold_id_to_title,  # ID→标题映射
                 "qid": qid,
                 "raw": data,
             })
@@ -319,75 +327,84 @@ def evaluate_query(
     gold_ids: Set[str],
     pred_titles: List[str],
     gold_titles: List[str],
+    gold_id_to_title: Dict[str, str] = None,
     k_values: List[int] = None,
 ) -> dict:
     """
     对单条查询计算各类评估指标。
-    支持 ID 匹配和标题回退匹配。
+
+    匹配策略（标题优先）：
+    1. 标题匹配（主要）：每个预测论文的标题与所有 gold 标题做模糊匹配
+    2. ID 匹配（辅助）：未被标题匹配到的预测论文，尝试用 ID 匹配
+    3. 每个预测论文最多计为 1 次 TP，各 gold 论文最多被匹配 1 次
     """
     if k_values is None:
         k_values = [1, 3, 5, 10, 20]
 
-    # ---- ID 匹配 ----
-    tp_ids, fp_ids, fn_ids = compute_metrics_tp_fp_fn(pred_ids, gold_ids)
-    precision_ids, recall_ids, f1_ids = calc_precision_recall_f1(tp_ids, fp_ids, fn_ids)
+    if gold_id_to_title is None:
+        gold_id_to_title = {}
 
-    # ---- 标题回退匹配（对没有 ID 的预测做补充） ----
-    # 找出 gold 中无 ID 的标题
-    gold_without_id = set()
-    for gt in gold_titles:
-        matched = False
-        for gid in gold_ids:
-            if gid.lower() in gt.lower() or gt.lower() in gid.lower():
-                matched = True
-                break
-        if not matched:
-            gold_without_id.add(gt)
-
-    # 标题匹配增强：用标题去匹配 gold 中无 ID 的部分
-    title_tp = 0
-    title_fp_extra = 0
-    title_matched_gold = set()
+    # ---- 标题匹配（主要匹配标准） ----
+    # gold_matched_by_title: 被标题匹配命中的 gold 论文 index 集合
+    gold_matched_by_title = set()
+    title_tp = 0  # 命中 gold 的预测论文数
+    title_fp = 0  # 未命中任何 gold 的预测论文数
 
     for pred_title in pred_titles:
-        match = match_title(pred_title, list(gold_titles), threshold=0.85)
+        match = match_title(pred_title, gold_titles, threshold=0.85)
         if match:
-            # 检查这个 gold title 是否已经被 ID 匹配覆盖了
-            gt_idx = gold_titles.index(match)
-            if gt_idx not in [i for i, gt in enumerate(gold_titles) if gt in gold_without_id]:
-                # 已被 ID 匹配覆盖
-                pass
-            elif match not in title_matched_gold:
-                title_tp += 1
-                title_matched_gold.add(match)
+            title_tp += 1
+            g_idx = gold_titles.index(match)
+            gold_matched_by_title.add(g_idx)
         else:
-            # 检查这个预测标题是否对应 gold 中已有的 ID
-            already_in_gold = False
-            for gt in gold_titles:
-                if title_similarity(pred_title, gt) > 0.9:
-                    gt_idx_in_gold = gold_titles.index(gt)
-                    if gt_idx_in_gold not in [i for i, gt in enumerate(gold_titles) if gt in gold_without_id]:
-                        already_in_gold = True
-                        break
-            if not already_in_gold:
-                title_fp_extra += 1
+            title_fp += 1
 
-    # 合并 ID 和标题匹配结果
-    combined_tp = tp_ids + title_tp
-    combined_fn = fn_ids + max(0, len(gold_without_id) - title_tp)
-    combined_fp = fp_ids + title_fp_extra
+    # ---- ID 匹配（辅助标准 - 仅用于标题未匹配的预测论文） ----
+    id_tp = 0  # 通过 ID 匹配额外命中的预测论文数
 
-    precision_combined, recall_combined, f1_combined = calc_precision_recall_f1(
-        combined_tp, combined_fp, combined_fn
-    )
+    for pred_id in pred_ids:
+        if pred_id in gold_ids:
+            # 检查这篇 gold 论文是否已被标题匹配覆盖
+            matched_title = gold_id_to_title.get(pred_id)
+            already_matched = (
+                matched_title is not None
+                and match_title(matched_title, gold_titles, threshold=0.85) is not None
+                and gold_titles.index(match_title(matched_title, gold_titles, threshold=0.85)) in gold_matched_by_title
+            )
+            if not already_matched:
+                id_tp += 1
+
+    # ---- 汇总 ----
+    tp = title_tp + id_tp
+    fp = len(pred_titles) - title_tp  # 标题未匹配的预测论文
+    fn = len(gold_titles) - len(gold_matched_by_title) - id_tp  # 从未被匹配的 gold 论文
+
+    # 确保指标非负
+    tp = max(0, tp)
+    fp = max(0, fp)
+    fn = max(0, fn)
+
+    precision, recall, f1 = calc_precision_recall_f1(tp, fp, fn)
+
+    # ---- ID 唯匹配（仅用于对比参考） ----
+    tp_ids, fp_ids, fn_ids = compute_metrics_tp_fp_fn(pred_ids, gold_ids)
+    precision_ids, recall_ids, f1_ids = calc_precision_recall_f1(tp_ids, fp_ids, fn_ids)
 
     # ---- @k 评估 ----
     at_k = {}
     for k in k_values:
-        k_pred = set(list(pred_ids)[:k]) if pred_ids else set()
-        k_tp = len(k_pred & gold_ids)
+        k_pred_titles = pred_titles[:k]
+        k_tp = 0
+        k_gold_matched = set()
+        for pt in k_pred_titles:
+            m = match_title(pt, gold_titles, threshold=0.85)
+            if m:
+                g_idx = gold_titles.index(m)
+                if g_idx not in k_gold_matched:
+                    k_gold_matched.add(g_idx)
+                k_tp += 1
         k_precision = k_tp / k if k > 0 else 0.0
-        k_recall = k_tp / len(gold_ids) if gold_ids else 0.0
+        k_recall = k_tp / len(gold_titles) if gold_titles else 0.0
         k_f1 = (
             2 * k_precision * k_recall / (k_precision + k_recall)
             if (k_precision + k_recall) > 0
@@ -401,20 +418,21 @@ def evaluate_query(
         }
 
     return {
-        "tp": combined_tp,
-        "fp": combined_fp,
-        "fn": combined_fn,
+        "tp": tp,
+        "fp": fp,
+        "fn": fn,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+        # ID 唯匹配结果（对比参考）
         "tp_ids": tp_ids,
         "fp_ids": fp_ids,
         "fn_ids": fn_ids,
         "precision_ids": precision_ids,
         "recall_ids": recall_ids,
         "f1_ids": f1_ids,
-        "precision": precision_combined,
-        "recall": recall_combined,
-        "f1": f1_combined,
-        "num_gold": len(gold_ids | gold_without_id),  # ground truth 总数
-        "num_pred": len(pred_ids) + title_fp_extra,    # 预测总数
+        "num_gold": len(gold_titles),
+        "num_pred": len(pred_titles),
         "at_k": at_k,
     }
 
@@ -436,11 +454,6 @@ def run_search_and_evaluate(
     运行搜索并对 benchmark 进行评估。
     返回 (per_query_results, output_folder_path)。
     """
-    # 导入搜索模块（延迟导入，避免无 API key 时直接报错）
-    from global_config import SEARCH_ROUTES, LLM_MODEL_NAME
-    from pipeline_spar import AcademicSearchTree
-    from utils import get_md5
-
     # 构建输出目录
     if output_dir is None:
         routes_str = "-".join(SEARCH_ROUTES)
@@ -509,6 +522,7 @@ def run_search_and_evaluate(
             gold_ids=record["answer_ids"],
             pred_titles=pred_titles,
             gold_titles=record["answer_titles"],
+            gold_id_to_title=record.get("gold_id_to_title", {}),
         )
 
         per_query_results.append({
@@ -586,6 +600,7 @@ def evaluate_existing_results(
             gold_ids=record["answer_ids"],
             pred_titles=pred_titles,
             gold_titles=record["answer_titles"],
+            gold_id_to_title=record.get("gold_id_to_title", {}),
         )
 
         per_query_results.append({
@@ -607,37 +622,36 @@ def evaluate_existing_results(
 def aggregate_metrics(per_query_results: List[dict]) -> dict:
     """
     汇总所有查询的评估结果，计算 micro/macro 平均和 @k 指标。
+
+    匹配标准（2026-07-05更新）：标题匹配为主，ID匹配为辅。
+    - micro/macro 指标基于标题匹配（tp/fp/fn）
+    - ids_* 指标为纯ID匹配，仅作参考对比
     """
     if not per_query_results:
         return {"error": "No results to aggregate"}
 
-    # ---- Micro 平均（全局 TP/FP/FN 累加） ----
-    total_tp = sum(r["eval"]["tp_ids"] for r in per_query_results)
-    total_fp = sum(r["eval"]["fp_ids"] for r in per_query_results)
-    total_fn = sum(r["eval"]["fn_ids"] for r in per_query_results)
+    # ---- 标题匹配 Micro 平均（全局 TP/FP/FN 累加） ----
+    total_tp = sum(r["eval"]["tp"] for r in per_query_results)
+    total_fp = sum(r["eval"]["fp"] for r in per_query_results)
+    total_fn = sum(r["eval"]["fn"] for r in per_query_results)
     micro_precision, micro_recall, micro_f1 = calc_precision_recall_f1(total_tp, total_fp, total_fn)
 
-    # ---- Macro 平均（每条查询独立算指标再平均） ----
-    macro_precision_list = [r["eval"]["precision_ids"] for r in per_query_results]
-    macro_recall_list = [r["eval"]["recall_ids"] for r in per_query_results]
-    macro_f1_list = [r["eval"]["f1_ids"] for r in per_query_results]
+    # ---- 纯ID匹配 Micro 平均（参考对比） ----
+    total_tp_ids = sum(r["eval"]["tp_ids"] for r in per_query_results)
+    total_fp_ids = sum(r["eval"]["fp_ids"] for r in per_query_results)
+    total_fn_ids = sum(r["eval"]["fn_ids"] for r in per_query_results)
+    micro_precision_ids, micro_recall_ids, micro_f1_ids = calc_precision_recall_f1(
+        total_tp_ids, total_fp_ids, total_fn_ids
+    )
 
-    # 过滤掉无效值（全是 0 的查询）
-    valid_p = [v for v in macro_precision_list if v > 0 or True]
-    valid_r = [v for v in macro_recall_list if v > 0 or True]
-    valid_f = [v for v in macro_f1_list if v > 0 or True]
+    # ---- Macro 平均（标题匹配） ----
+    macro_precision_list = [r["eval"]["precision"] for r in per_query_results]
+    macro_recall_list = [r["eval"]["recall"] for r in per_query_results]
+    macro_f1_list = [r["eval"]["f1"] for r in per_query_results]
 
     macro_precision = np.mean(macro_precision_list) if macro_precision_list else 0.0
     macro_recall = np.mean(macro_recall_list) if macro_recall_list else 0.0
     macro_f1 = np.mean(macro_f1_list) if macro_f1_list else 0.0
-
-    # ---- 标题增强后的指标 ----
-    total_tp_combined = sum(r["eval"]["tp"] for r in per_query_results)
-    total_fp_combined = sum(r["eval"]["fp"] for r in per_query_results)
-    total_fn_combined = sum(r["eval"]["fn"] for r in per_query_results)
-    combined_precision, combined_recall, combined_f1 = calc_precision_recall_f1(
-        total_tp_combined, total_fp_combined, total_fn_combined
-    )
 
     # ---- @k 指标汇总 ----
     k_values = sorted(per_query_results[0]["eval"]["at_k"].keys()) if per_query_results else []
@@ -653,9 +667,9 @@ def aggregate_metrics(per_query_results: List[dict]) -> dict:
         }
 
     # ---- 统计分布 ----
-    precisions = [r["eval"]["precision_ids"] for r in per_query_results]
-    recalls = [r["eval"]["recall_ids"] for r in per_query_results]
-    f1s = [r["eval"]["f1_ids"] for r in per_query_results]
+    precisions = [r["eval"]["precision"] for r in per_query_results]
+    recalls = [r["eval"]["recall"] for r in per_query_results]
+    f1s = [r["eval"]["f1"] for r in per_query_results]
 
     stats = {
         "num_queries": len(per_query_results),
@@ -663,7 +677,7 @@ def aggregate_metrics(per_query_results: List[dict]) -> dict:
         "num_queries_empty_gold": sum(1 for r in per_query_results if r["num_gold"] == 0),
         "num_queries_empty_pred": sum(1 for r in per_query_results if r["num_pred"] == 0),
 
-        # Micro 平均
+        # 标题匹配 Micro 平均（主指标）
         "total_tp": total_tp,
         "total_fp": total_fp,
         "total_fn": total_fn,
@@ -671,13 +685,13 @@ def aggregate_metrics(per_query_results: List[dict]) -> dict:
         "micro_recall": micro_recall,
         "micro_f1": micro_f1,
 
-        # 标题增强合并
-        "combined_tp": total_tp_combined,
-        "combined_fp": total_fp_combined,
-        "combined_fn": total_fn_combined,
-        "combined_precision": combined_precision,
-        "combined_recall": combined_recall,
-        "combined_f1": combined_f1,
+        # ID唯匹配 Micro 平均（参考）
+        "total_tp_ids": total_tp_ids,
+        "total_fp_ids": total_fp_ids,
+        "total_fn_ids": total_fn_ids,
+        "micro_precision_ids": micro_precision_ids,
+        "micro_recall_ids": micro_recall_ids,
+        "micro_f1_ids": micro_f1_ids,
 
         # Macro 平均
         "macro_precision": macro_precision,
@@ -702,12 +716,14 @@ def aggregate_metrics(per_query_results: List[dict]) -> dict:
                 "question": r["question"][:80],
                 "num_gold": r["num_gold"] if isinstance(r["num_gold"], int) else len(r["num_gold"]),
                 "num_pred": r["num_pred"] if isinstance(r["num_pred"], int) else len(r["num_pred"]),
-                "tp": r["eval"]["tp_ids"],
-                "fp": r["eval"]["fp_ids"],
-                "fn": r["eval"]["fn_ids"],
-                "precision": r["eval"]["precision_ids"],
-                "recall": r["eval"]["recall_ids"],
-                "f1": r["eval"]["f1_ids"],
+                "tp": r["eval"]["tp"],
+                "fp": r["eval"]["fp"],
+                "fn": r["eval"]["fn"],
+                "precision": r["eval"]["precision"],
+                "recall": r["eval"]["recall"],
+                "f1": r["eval"]["f1"],
+                "tp_ids": r["eval"]["tp_ids"],
+                "precision_ids": r["eval"]["precision_ids"],
             }
             for r in per_query_results
         ],
@@ -732,8 +748,8 @@ def print_report(stats: dict, title: str = "评估报告"):
     if stats['num_queries_empty_gold'] > 0:
         print(f"  空 ground truth 数: {stats['num_queries_empty_gold']}")
 
-    # ID 匹配
-    print(f"\n[ID匹配] ID 匹配评估:")
+    # 标题匹配评估（主指标）
+    print(f"\n[标题匹配] 标题匹配评估（主要标准）:")
     print(f"  TP={stats['total_tp']}  FP={stats['total_fp']}  FN={stats['total_fn']}")
     print(f"  Micro 精确率 (Precision): {stats['micro_precision']:.4f}")
     print(f"  Micro 召回率 (Recall):    {stats['micro_recall']:.4f}")
@@ -743,13 +759,13 @@ def print_report(stats: dict, title: str = "评估报告"):
     print(f"  Macro 召回率 (Recall):    {stats['macro_recall']:.4f} (+-{stats['macro_recall_std']:.4f})")
     print(f"  Macro F1 分数:            {stats['macro_f1']:.4f} (+-{stats['macro_f1_std']:.4f})")
 
-    # 标题增强合并
-    if stats.get("combined_tp", 0) != stats["total_tp"]:
-        print(f"\n[标题合并] ID+标题合并评估:")
-        print(f"  TP={stats['combined_tp']}  FP={stats['combined_fp']}  FN={stats['combined_fn']}")
-        print(f"  Micro 精确率 (Precision): {stats['combined_precision']:.4f}")
-        print(f"  Micro 召回率 (Recall):    {stats['combined_recall']:.4f}")
-        print(f"  Micro F1 分数:            {stats['combined_f1']:.4f}")
+    # ID唯一匹配（参考）
+    if stats.get("total_tp_ids", 0) != stats["total_tp"]:
+        print(f"\n[ID匹配] 纯ID匹配评估（仅作参考）:")
+        print(f"  TP={stats['total_tp_ids']}  FP={stats['total_fp_ids']}  FN={stats['total_fn_ids']}")
+        print(f"  Micro 精确率 (Precision): {stats['micro_precision_ids']:.4f}")
+        print(f"  Micro 召回率 (Recall):    {stats['micro_recall_ids']:.4f}")
+        print(f"  Micro F1 分数:            {stats['micro_f1_ids']:.4f}")
 
     # @k 评估
     if stats.get("at_k"):
@@ -974,7 +990,7 @@ def parse_args():
                         help="运行模式: full=搜索+评估, load=仅评估已有结果 (default: full)")
     parser.add_argument("--result_dir", type=str, default=None,
                         help="load 模式下的结果目录路径 (run_spr_agent.py 的输出)")
-    parser.add_argument("--sample", type=int, default=None,
+    parser.add_argument("--sample", type=int, default=10,
                         help="采样数量 (默认全部)")
     parser.add_argument("--depth", type=int, default=2,
                         help="搜索树深度 (default: 2)")
@@ -984,9 +1000,9 @@ def parse_args():
                         help="每查询目标相关论文数 (default: 10)")
     parser.add_argument("--output", type=str, default=None,
                         help="输出目录 (默认自动生成)")
-    parser.add_argument("--no_chart", action="store_true",
+    parser.add_argument("--no_chart", action="store_false",
                         help="跳过生成图表")
-    parser.add_argument("--title_match", action="store_true",
+    parser.add_argument("--title_match", action="store_false",
                         help="启用标题模糊匹配增强（ID 匹配的基础上）")
 
     return parser.parse_args()
@@ -1072,9 +1088,13 @@ def main():
         "total_tp": stats["total_tp"],
         "total_fp": stats["total_fp"],
         "total_fn": stats["total_fn"],
-        "combined_precision": stats.get("combined_precision", stats["micro_precision"]),
-        "combined_recall": stats.get("combined_recall", stats["micro_recall"]),
-        "combined_f1": stats.get("combined_f1", stats["micro_f1"]),
+        # ID唯匹配（参考）
+        "micro_precision_ids": stats.get("micro_precision_ids", 0),
+        "micro_recall_ids": stats.get("micro_recall_ids", 0),
+        "micro_f1_ids": stats.get("micro_f1_ids", 0),
+        "total_tp_ids": stats.get("total_tp_ids", 0),
+        "total_fp_ids": stats.get("total_fp_ids", 0),
+        "total_fn_ids": stats.get("total_fn_ids", 0),
         "at_k": {str(k): v for k, v in stats.get("at_k", {}).items()},
         "config": {
             "depth": args.depth,
@@ -1088,7 +1108,7 @@ def main():
         json.dump(serializable_stats, f, indent=2, ensure_ascii=False)
     print(f"[报告] JSON 报告已保存到 {report_json_path}")
 
-    print(f"\n📁 所有输出保存在: {output_dir}")
+    print(f"\n[输出] 所有输出保存在: {output_dir}")
     print("=" * 70)
 
     # 返回主要指标供调用

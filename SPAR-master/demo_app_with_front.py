@@ -395,7 +395,6 @@ async def _advanced_search(request: SearchRequest) -> SearchResponse:
                 all_results[query] = papers_list
                 all_papers.update(papers_dict)
                 query_source_map[query] = "advanced_search"
-
                 # 保存搜索树结构
                 try:
                     if hasattr(search_agent, 'root') and search_agent.root:

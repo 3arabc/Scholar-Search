@@ -16,7 +16,6 @@ from search_engine import AcademicTreeSearchEngine,llm_relevance_score
 from search_node import SearchNode
 from typing import List, Dict, Optional
 import json
-import random
 import re
 import time
 import tqdm
@@ -144,7 +143,7 @@ class AcademicSearchTree:
             logger.info("No documents to save to local DB")
             return
 
-        logger.info(f"🤔 Saving {len(id2docs)} documents to local database")
+        logger.info(f" Saving {len(id2docs)} documents to local database")
         start_time = time.time()
         success_count = 0
 
@@ -164,7 +163,7 @@ class AcademicSearchTree:
                         logger.error(f"Failed to save document {arxiv}: {str(e)}")
 
             logger.info(
-                f"😁 Saved {success_count}/{len(id2docs)} documents to local DB in {time.time() - start_time:.2f}s"
+                f" Saved {success_count}/{len(id2docs)} documents to local DB in {time.time() - start_time:.2f}s"
             )
         except Exception as e:
             logger.error(f"Database operation failed: {traceback.format_exc()}")
@@ -178,7 +177,7 @@ class AcademicSearchTree:
         try:
             query_node_relations = {}
             expanded_queries_info = self.search_engine.expand_query(self.root.query_str)
-            logger.info(f"expanded_queries_info: {expanded_queries_info}")
+            # logger.info(f"expanded_queries_info: {expanded_queries_info}")
             expanded_queries_info["QUERY_NUM_PRUNED"] = QUERY_NUM_PRUNED
             self.root.extra["expanded_queries_info"] = expanded_queries_info
             expanded_queries = expanded_queries_info["expanded_queries"]
@@ -232,7 +231,7 @@ class AcademicSearchTree:
             f"Running query_level_search with {len(expanded_queries)} queries at depth {current_depth}"
         )
         logger.info(f"expanded_queries: {expanded_queries}")
-        logger.info(f"query_node_relations: {query_node_relations}")
+        # logger.info(f"query_node_relations: {query_node_relations}")
 
         # Determine sources based on expanded_queries_info if available
         if hasattr(self.root, "extra") and "expanded_queries_info" in self.root.extra:
@@ -254,13 +253,18 @@ class AcademicSearchTree:
             sources.insert(0, "arxiv")
             logger.info(f"Adding 'arxiv' to sources: {sources}")
 
-        #f current_depth > 1:  #wsl-72去除限制
-        logger.info(f"current_depth: {current_depth}, only search arxiv")
-        sources = ["arxiv"]
-
-        if "openalex" not in sources: #wsl-72搜索包含openalex
-            sources.append("openalex")
-            logger.info("Forced adding openalex to sources")
+        # 使用意图分析确定的 sources，不做强制覆盖
+        if current_depth > 1:
+            # 深层搜索用 arxiv 为主（速度快），保留 openalex 做辅助
+            if "arxiv" not in sources:
+                sources.insert(0, "arxiv")
+            if "openalex" not in sources:
+                sources.append("openalex")
+        else:
+            # 第1层使用完整 sources（来自意图分析或配置）
+            if "arxiv" not in sources:
+                sources.insert(0, "arxiv")
+        logger.info(f"Using sources: {sources}")
 
         try:
             # Execute batch search across multiple sources
@@ -322,79 +326,111 @@ class AcademicSearchTree:
                     )
                     parent_node.add_child(new_node)
                     current_level_node.append(new_node)
-            # Process each node's search results
+            # ==== 统一评分：按 source 合并去重 → 评分一次 → 分发回各 node ====
             logger.info(f"current level node: {len(current_level_node)}")
+
+            # ── Step A: 按 source 收集所有论文，去重，记录来源 query ──
+            source_paper_pool = {}  # source → {paper_id: {doc, found_by_queries: set()}}
+            for node in current_level_node:
+                raw_docs = batch_result.get(node.query_str, [])
+                if not raw_docs:
+                    continue
+                if node.source not in source_paper_pool:
+                    source_paper_pool[node.source] = {}
+                pool = source_paper_pool[node.source]
+                for doc in raw_docs:
+                    pid = doc.get("paper_id", doc.get("arxivId"))
+                    if not doc.get("title") or not doc.get("abstract"):
+                        continue
+                    if pid in self.root.cal_sim_docs:
+                        continue  # 已在之前深度中评分过，跳过
+                    if pid not in pool:
+                        pool[pid] = {"doc": doc, "found_by_queries": set()}
+                    pool[pid]["found_by_queries"].add(node.query_str)
+
+            # ── Step B: 对每个 source 统一评分 ──
+            source_score_map = {}  # source → {paper_id: score_info}
+            for source, pool in source_paper_pool.items():
+                unique_docs = [p["doc"] for p in pool.values()]
+                if not unique_docs:
+                    continue
+                logger.info(
+                    f"[{source}] Unified scoring: {len(unique_docs)} unique papers "
+                    f"(from {len(pool)} unique IDs)"
+                )
+                relevant, irrelevant = self.search_engine.calculate_similarity(
+                    query=self.root.query_str,
+                    docs=unique_docs,
+                    search_time=self.search_date,
+                    score_thresh=self.sim_threshold,
+                    source=f"from retrieval, source: [{source}]",
+                )
+                # 建立 paper_id → score_info 的查找表，同时注入来源信息
+                lookup = {}
+                for r in relevant:
+                    pid = r.get("paper_id", r.get("arxivId"))
+                    r["found_by_queries"] = list(pool.get(pid, {}).get("found_by_queries", []))
+                    lookup[pid] = r
+                for ir in irrelevant:
+                    pid = ir.get("paper_id", ir.get("arxivId"))
+                    ir["found_by_queries"] = list(pool.get(pid, {}).get("found_by_queries", []))
+                    lookup[pid] = ir
+                source_score_map[source] = lookup
+
+                self.root.add_signature_for_doc(relevant)
+                self.root.cal_sim_docs.update({
+                    one.get("paper_id", one.get("arxivId")): one
+                    for one in relevant + irrelevant
+                })
+
+            # ── Step C: 将评分结果分发回各 node ──
             valid_doc_count = 0
             rel_doc_count = 0
             for node in tqdm.tqdm(
                 current_level_node,
                 total=len(current_level_node),
-                desc="Processing search results",
+                desc="Distributing scored results",
             ):
                 try:
                     raw_docs = batch_result.get(node.query_str, [])
-
                     if not raw_docs:
                         node.status = "Failed"
                         next_level.append(node)
                         continue
 
-                    # Filter for docs with required fields
-                    valid_docs = [
-                        doc
-                        for doc in raw_docs
-                        if doc.get("title", "")
-                        and doc.get("abstract", "")
-                        and doc.get("paper_id", doc.get("arxivId"))
-                        not in self.root.cal_sim_docs
-                    ]
+                    lookup = source_score_map.get(node.source, {})
+                    node_docs = []
+                    node_irrelevant = []
+                    seen_in_node = set()
+                    for doc in raw_docs:
+                        pid = doc.get("paper_id", doc.get("arxivId"))
+                        if not doc.get("title") or not doc.get("abstract"):
+                            continue
+                        if pid in seen_in_node:
+                            continue
+                        seen_in_node.add(pid)
+                        score_info = lookup.get(pid)
+                        if score_info is None:
+                            continue  # 已在 cal_sim_docs 中（跨层去重）
+                        if score_info.get("sim_score", 0) >= self.sim_threshold:
+                            node_docs.append(score_info)
+                        else:
+                            node_irrelevant.append(score_info)
 
-                    logger.info(
-                        f"raw_docs: {len(raw_docs)}, valid_docs: {len(valid_docs)}"
-                    )
+                    valid_doc_count += len(node_docs) + len(node_irrelevant)
 
-                    valid_doc_count += len(valid_docs)
-
-                    if not valid_docs:
-                        logger.warning(
-                            f"No valid docs found for query: {node.query_str}"
-                        )
-                        node.status = "NO Valid Docs"
-                        continue
-
-                    # Calculate similarity scores
-                    relevant_docs, irrelevance_docs = (
-                        self.search_engine.calculate_similarity(
-                            query=self.root.query_str,
-                            docs=valid_docs,
-                            search_time=self.search_date,
-                            score_thresh=self.sim_threshold,
-                            source=f"from retrieval, query: [{node.source}] -- {node.query_str}",
-                        )
-                    )
-
-                    # Update document collections
-                    self.root.add_signature_for_doc(relevant_docs + irrelevance_docs)
-                    self.root.cal_sim_docs.update(
-                        {
-                            one.get("paper_id", one.get("arxivId")): one
-                            for one in relevant_docs + irrelevance_docs
-                        }
-                    )
-                    # Update node status based on search results
-                    if len(relevant_docs) == 0 and len(irrelevance_docs) == 0:
+                    if not node_docs and not node_irrelevant:
                         node.status = "Failed"
                         if node not in next_level:
                             next_level.append(node)
-
-                    elif len(relevant_docs) > 0:
+                    elif node_docs:
                         node.status = "Expand"
-                        rel_doc_count += len(relevant_docs)
+                        rel_doc_count += len(node_docs)
                     else:
                         node.status = "NO Relevance"
 
-                    node.docs.extend(relevant_docs)
-                    node.irrelevant_docs.extend(irrelevance_docs)
+                    node.docs.extend(node_docs)
+                    node.irrelevant_docs.extend(node_irrelevant)
 
                 except Exception as e:
                     logger.error(
@@ -403,7 +439,8 @@ class AcademicSearchTree:
                     node.status = "Error"
 
             logger.info(
-                f"Query level search completed: {valid_doc_count} valid docs, {rel_doc_count} relevant docs, failed node mum: {len(next_level)}"
+                f"Query level search completed: {valid_doc_count} valid docs, "
+                f"{rel_doc_count} relevant docs, failed node num: {len(next_level)}"
             )
             return current_level_node, next_level
 
@@ -429,10 +466,26 @@ class AcademicSearchTree:
 
         try:
             # Collect all relevant documents for reference exploration
+            MIN_EXPAND_DOCS = 5
             all_rel_docs = []
             for node in level_node:
-                # Use both relevant and irrelevant docs for reference expansion
-                expand_docs = node.docs + node.irrelevant_docs
+                # Try threshold first; if too few, fall back to top N by sim_score
+                expand_docs = [
+                    doc for doc in (node.docs + node.irrelevant_docs)
+                    if doc.get("sim_score", 0) >= REFERENCE_EXPAND_THRESHOLD
+                ]
+                if len(expand_docs) < MIN_EXPAND_DOCS:
+                    # Fallback: take top MIN_EXPAND_DOCS docs regardless of score
+                    node_all = sorted(
+                        node.docs + node.irrelevant_docs,
+                        key=lambda d: d.get("sim_score", 0),
+                        reverse=True,
+                    )
+                    expand_docs = node_all[:MIN_EXPAND_DOCS]
+                    logger.debug(
+                        f"Reference expand threshold too strict ({len(expand_docs)} docs ≥ {REFERENCE_EXPAND_THRESHOLD}), "
+                        f"falling back to top {MIN_EXPAND_DOCS} docs for node '{node.query_str[:40]}'"
+                    )
                 for doc in expand_docs:
                     all_rel_docs.append([node, doc])
 
@@ -556,7 +609,7 @@ class AcademicSearchTree:
 
                         # Update document collections
                         self.root.add_signature_for_doc(
-                            relevant_refs + irrelevance_refs
+                            relevant_refs
                         )
                         self.root.cal_sim_docs.update(
                             {
@@ -655,7 +708,7 @@ class AcademicSearchTree:
         logger.info(f"nex_level_prepare: {len(nex_level_prepare)}")
         if nex_level_prepare:
             if QUERY_NUM_PRUNED < len(nex_level_prepare):
-                nex_level_prepare_shuffle = random.sample(
+                nex_level_prepare_shuffle = self._select_diverse_queries(
                     nex_level_prepare, QUERY_NUM_PRUNED
                 )
             else:
@@ -696,7 +749,7 @@ class AcademicSearchTree:
         self.search_date = ""
 
         # Initialize search tree
-        logger.info("🌲 Initializing academic search tree")
+        logger.info("Initializing academic search tree")
         self.root = SearchNode(
             query_str=initial_query,
             status="INIT",
@@ -811,15 +864,13 @@ class AcademicSearchTree:
                 logger.info(f"After LLM filter: {len(filtered_docs)} documents kept")
 
             # wsl-73
-            if RERANK:
-                logger.info("Reranking final document list")
-                reranked_docs = self.reranker.rerank_query_and_doc_list(
-                    self.root.searched_docs, self.user_query
-                )
-                # 替换为重排序后的结果
-                self.root.reranked_top_docs = reranked_docs
-                # 然后用重排序后的文档替换 searched_docs（或保留为独立字段）
-                # 例如：self.root.searched_docs = reranked_docs
+            # Rerank disabled: LLM cost >> benefit, use BGE-M3 sim_score as sole criterion
+            # if RERANK:
+            #     logger.info("Reranking final document list")
+            #     reranked_docs = self.reranker.rerank_query_and_doc_list(
+            #         self.root.searched_docs, self.user_query
+            #     )
+            #     self.root.reranked_top_docs = reranked_docs
 
             return self._collect_results()
 
@@ -832,45 +883,57 @@ class AcademicSearchTree:
             self._cleanup_resources()
 
     def _collect_results(self) -> Dict:
-        """Collect search results with diversity optimization"""
-        # Get all documents
+        """Collect search results: sort by sim_score desc, take top max_docs."""
         all_docs = self.root.searched_docs
+        sorted_docs = sorted(
+            all_docs.items(),
+            key=lambda x: x[1].get("sim_score", 0),
+            reverse=True,
+        )
+        return dict(sorted_docs[:self.max_docs])
 
-        # Group documents by research approach/methodology
-        docs_by_field = {}
-        for doc_id, doc in all_docs.items():
-            fields = doc.get("fieldsOfStudy", ["unknown"])
-            for field in fields:
-                if field not in docs_by_field:
-                    docs_by_field[field] = []
-                docs_by_field[field].append((doc_id, doc))
+    def _select_diverse_queries(self, candidates, k):
+        """
+        基于 Jaccard 多样性的贪心查询选择。
+        从候选查询中选择 k 个在内容上最多样化的查询，替代随机采样。
+        """
+        if len(candidates) <= k:
+            return candidates
 
-        # Select top docs from each field to ensure diversity
-        diverse_results = {}
-        for field, docs in docs_by_field.items():
-            # Sort by relevance within field
-            docs.sort(key=lambda x: x[1].get("sim_score", 0), reverse=True)
-            # Take top N from each field
-            for doc_id, doc in docs[:3]:  # Take top 3 from each field
-                diverse_results[doc_id] = doc
+        def tokenize(s):
+            return set(re.findall(r'\w+', s.lower()))
 
-        # Fill remaining slots with highest scoring docs overall
-        remaining_slots = self.max_docs - len(diverse_results)
-        if remaining_slots > 0:
-            remaining_docs = {
-                doc_id: doc
-                for doc_id, doc in all_docs.items()
-                if doc_id not in diverse_results
-            }
-            sorted_remaining = sorted(
-                remaining_docs.items(),
-                key=lambda x: x[1].get("sim_score", 0),
-                reverse=True,
-            )
-            for doc_id, doc in sorted_remaining[:remaining_slots]:
-                diverse_results[doc_id] = doc
+        def jaccard_sim(t1, t2):
+            inter = len(t1 & t2)
+            union = len(t1 | t2)
+            return inter / union if union > 0 else 0.0
 
-        return diverse_results
+        # 计算每个候选查询的 token 集合
+        candidates_with_tokens = [
+            (parent_node, child_node, tokenize(child_node.query_str))
+            for parent_node, child_node in candidates
+        ]
+
+        # 贪心选择：先选第一个，然后每次选与已选集合最不相似的
+        selected = [candidates_with_tokens[0]]
+        remaining = candidates_with_tokens[1:]
+
+        while len(selected) < k and remaining:
+            # 对每个剩余候选，计算它与已选集合的最小 Jaccard 距离（最大差异 = 最小相似度）
+            best_idx = 0
+            best_min_sim = float('inf')  # 找最小相似度（最大差异）
+            for i, (p_node, c_node, tokens) in enumerate(remaining):
+                max_sim_to_selected = max(
+                    jaccard_sim(tokens, s_tokens)
+                    for _, _, s_tokens in selected
+                )
+                if max_sim_to_selected < best_min_sim:
+                    best_min_sim = max_sim_to_selected
+                    best_idx = i
+
+            selected.append(remaining.pop(best_idx))
+
+        return [[p, c] for p, c, _ in selected]
 
     def _rank_query_doc_list(self, docs):
         """
