@@ -632,9 +632,17 @@
         <div class="results" id="results">
             <div class="results-header">
                 <h2>Search Results</h2>
-                <button type="button" onclick="exportResults()" style="padding: 8px 16px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer;">
-                    📄 Export JSON
-                </button>
+                <div>
+                    <button type="button" onclick="loadHistory()" style="padding: 8px 16px; background: #6366f1; color: white; border: none; border-radius: 6px; cursor: pointer; margin-right: 10px;">
+                        📜 History
+                    </button>
+                    <button type="button" onclick="openFavorites()" style="padding: 8px 16px; background: #f59e0b; color: white; border: none; border-radius: 6px; cursor: pointer; margin-right: 10px;">
+                        ⭐ Favorites
+                    </button>
+                    <button type="button" onclick="exportResults()" style="padding: 8px 16px; background: #10b981; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                        📄 Export JSON
+                    </button>
+                </div>
             </div>
 
             <div class="stats" id="stats"></div>
@@ -651,6 +659,8 @@
     <script>
         let currentResults = null;
         let currentSearchMode = 'advanced';
+        let favoritesSet = new Set();  // 存储已收藏的 paper_id
+        let currentFavorites = [];     // 缓存完整收藏列表
 
         // 等待DOM完全加载
         document.addEventListener('DOMContentLoaded', function() {
@@ -735,6 +745,8 @@
             if (searchForm) {
                 searchForm.addEventListener('submit', handleFormSubmit);
             }
+            // 初始化收藏夹
+            refreshFavorites().catch(err => console.warn('Failed to load favorites on init:', err));
         });
 
         async function handleFormSubmit(e) {
@@ -849,6 +861,7 @@
                 });
 
                 currentResults = data;
+                await refreshFavorites();   // 先刷新收藏状态，再渲染
                 displayResults(data);
 
             } catch (error) {
@@ -1122,7 +1135,13 @@
                 }
 
                 return `
-                    <div class="paper-item">
+                    <div class="paper-item" style="position: relative;">
+                        <div style="position: absolute; top: 10px; right: 10px; z-index: 10;">
+                            <span onclick="toggleFavorite('${paperId}', this)"
+                                  style="font-size: 24px; cursor: pointer; color: ${favoritesSet.has(paperId) ? '#f59e0b' : '#9ca3af'};">
+                                ${favoritesSet.has(paperId) ? '★' : '☆'}
+                            </span>
+                        </div>
                         <div class="paper-title">${titleHtml}</div>
                         <div class="paper-authors">👥 ${authors}</div>
                         <div class="paper-abstract">${abstract}</div>
@@ -1162,6 +1181,216 @@
                 alert('Failed to export results');
             }
         }
+        // 获取收藏夹并更新 favoritesSet
+        function refreshFavorites() {
+            return fetch('/favorites')
+                .then(res => res.json())
+                .then(data => {
+                    currentFavorites = data.favorites || [];
+                    favoritesSet = new Set(currentFavorites.map(p => p.paper_id));
+                    return currentFavorites;
+                })
+                .catch(err => {
+                    console.error('Failed to load favorites:', err);
+                    return [];
+                });
+        }
+
+        // 切换收藏状态
+        async function toggleFavorite(paperId, element) {
+            // 如果已收藏，则取消收藏
+            if (favoritesSet.has(paperId)) {
+                try {
+                    const res = await fetch(`/favorites/${paperId}`, { method: 'DELETE' });
+                    const data = await res.json();
+                    if (data.status === 'removed') {
+                        favoritesSet.delete(paperId);
+                        // 更新按钮样式
+                        if (element) {
+                            element.textContent = '☆';
+                            element.title = 'Add to favorites';
+                            element.style.color = '#9ca3af';
+                        }
+                        // 如果收藏夹模态框打开，刷新列表
+                        const modal = document.getElementById('favoritesModal');
+                        if (modal && modal.style.display === 'block') {
+                            loadFavoritesList();
+                        }
+                    }
+                } catch (err) {
+                    console.error('Failed to remove favorite:', err);
+                    alert('Failed to remove favorite.');
+                }
+            } else {
+                // 添加收藏
+                try {
+                    // 需要获取当前论文的完整数据
+                    // 从 currentResults 中查找该 paper_id 对应的数据
+                    const paperData = findPaperData(paperId);
+                    if (!paperData) {
+                        alert('Paper data not found.');
+                        return;
+                    }
+                    const res = await fetch(`/favorites/${paperId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(paperData)
+                    });
+                    const data = await res.json();
+                    if (data.status === 'added' || data.status === 'already_exists') {
+                        favoritesSet.add(paperId);
+                        if (element) {
+                            element.textContent = '★';
+                            element.title = 'Remove from favorites';
+                            element.style.color = '#f59e0b';
+                        }
+                        // 如果收藏夹模态框打开，刷新列表
+                        const modal = document.getElementById('favoritesModal');
+                        if (modal && modal.style.display === 'block') {
+                            loadFavoritesList();
+                        }
+                    }
+                } catch (err) {
+                    console.error('Failed to add favorite:', err);
+                    alert('Failed to add favorite.');
+                }
+            }
+        }
+
+        // 根据 paper_id 查找论文数据
+        function findPaperData(paperId) {
+            if (!currentResults) return null;
+            // 遍历 all_papers
+            if (currentResults.all_papers && currentResults.all_papers[paperId]) {
+                return currentResults.all_papers[paperId];
+            }
+            // 遍历 query_results
+            for (const query in currentResults.query_results) {
+                const papers = currentResults.query_results[query];
+                for (const paper of papers) {
+                    if (paper.paper_id === paperId) {
+                        return paper;
+                    }
+                }
+            }
+            return null;
+        }
+
+        // 打开收藏夹模态框
+        function openFavorites() {
+            const modal = document.getElementById('favoritesModal');
+            modal.style.display = 'block';
+            loadFavoritesList();
+        }
+
+        function closeFavoritesModal() {
+            document.getElementById('favoritesModal').style.display = 'none';
+        }
+
+        // 加载收藏夹列表
+        function loadFavoritesList() {
+            const container = document.getElementById('favoritesList');
+            container.innerHTML = '<p>Loading...</p>';
+            refreshFavorites().then(favorites => {
+                if (!favorites || favorites.length === 0) {
+                    container.innerHTML = '<p>No favorites yet.</p>';
+                    return;
+                }
+                // 复用 formatPaper 渲染
+                const html = favorites.map(paper => formatPaper(paper)).join('');
+                container.innerHTML = html;
+                // 为每个论文的收藏按钮更新状态（因为 formatPaper 生成的是☆，需要根据favoritesSet设置样式）
+                // 但 formatPaper 会生成按钮，我们在生成时根据 favoritesSet 决定初始样式
+                // 但由于 formatPaper 是静态生成的，我们需要在生成后修正
+                // 更好的方式：在 formatPaper 中根据全局 favoritesSet 决定。
+                // 我们将在下面对 formatPaper 进行修改，使其在生成时自动检测。
+            });
+        }
+
+        // 打开历史模态框
+        function loadHistory() {
+            const modal = document.getElementById('historyModal');
+            modal.style.display = 'block';
+            document.getElementById('historyList').innerHTML = '<p>Loading...</p>';
+
+            fetch('/history')
+                .then(res => res.json())
+                .then(data => {
+                    const list = data.history;
+                    if (!list || list.length === 0) {
+                        document.getElementById('historyList').innerHTML = '<p>No history found.</p>';
+                        return;
+                    }
+                    let html = '<ul style="list-style: none; padding: 0;">';
+                    list.forEach(item => {
+                        const time = new Date(item.timestamp).toLocaleString();
+                        html += `<li style="padding: 10px; border-bottom: 1px solid #e5e7eb; cursor: pointer;" onclick="loadHistoryEntry('${item.id}')">
+                                    <div style="font-weight: 500;">${item.query}</div>
+                                    <div style="font-size: 12px; color: #6b7280;">${time}</div>
+                                </li>`;
+                    });
+                    html += '</ul>';
+                    document.getElementById('historyList').innerHTML = html;
+                })
+                .catch(err => {
+                    document.getElementById('historyList').innerHTML = '<p style="color: red;">Failed to load history.</p>';
+                });
+        }
+
+        function closeHistoryModal() {
+            document.getElementById('historyModal').style.display = 'none';
+        }
+
+        // 加载指定历史记录
+        function loadHistoryEntry(historyId) {
+            closeHistoryModal();
+            // 显示加载状态
+            const loading = document.getElementById('loading');
+            const results = document.getElementById('results');
+            loading.style.display = 'block';
+            results.style.display = 'none';
+
+            fetch(`/history/${historyId}`)
+                .then(res => {
+                    if (!res.ok) throw new Error('Failed to load history');
+                    return res.json();
+                })
+                .then(data => {
+                    const responseData = data.response;
+                    currentResults = responseData;
+                    displayResults(responseData);
+                    loading.style.display = 'none';
+                    results.style.display = 'block';
+                })
+                .catch(err => {
+                    loading.style.display = 'none';
+                    showError(`Failed to load history: ${err.message}`);
+                });
+        }
     </script>
+<!-- 历史记录弹出层 -->
+<div id="historyModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 1000;">
+    <div style="background: white; max-width: 600px; margin: 50px auto; padding: 20px; border-radius: 12px; max-height: 80vh; overflow-y: auto;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <h3>Search History</h3>
+            <button onclick="closeHistoryModal()" style="background: none; border: none; font-size: 24px; cursor: pointer;">&times;</button>
+        </div>
+        <div id="historyList">
+            <p>Loading...</p>
+        </div>
+    </div>
+</div>
+<!-- 收藏夹弹出层 -->
+<div id="favoritesModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 1000;">
+    <div style="background: white; max-width: 800px; margin: 50px auto; padding: 20px; border-radius: 12px; max-height: 80vh; overflow-y: auto;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <h3>⭐ My Favorites</h3>
+            <button onclick="closeFavoritesModal()" style="background: none; border: none; font-size: 24px; cursor: pointer;">&times;</button>
+        </div>
+        <div id="favoritesList">
+            <p>Loading...</p>
+        </div>
+    </div>
+</div>
 </body>
 </html>
