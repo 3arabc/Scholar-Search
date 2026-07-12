@@ -41,6 +41,21 @@ class SearchRequest(BaseModel):
     filter_min_citations: Optional[int] = None
     filter_fields: Optional[List[str]] = []
     sort_by: Optional[str] = 'year'  # 可选值: 'year', 'citations', 'similarity'
+    selected_queries: Optional[List[str]] = None  # 用户选中的 arXiv 查询子集
+    selected_keywords: Optional[List[str]] = None  # 用户选中的 OpenAlex 关键词
+    expanded_queries: Optional[List[str]] = None  # 预览阶段生成的完整扩展查询列表
+
+# 预览请求/响应模型
+class PreviewRequest(BaseModel):
+    queries: List[str]
+
+class PreviewResponse(BaseModel):
+    status: str
+    expanded_queries: Dict[str, List[str]]  # original_query -> [expanded queries]
+    extracted_keywords: List[str]  # OpenAlex 关键词
+    suitable_sources: List[str]
+    query_intent: Optional[str] = ""
+    domain: Optional[str] = ""
 
 # 响应模型
 class SearchResponse(BaseModel):
@@ -80,6 +95,70 @@ async def read_root():
 async def health_check():
     """健康检查接口"""
     return {"status": "healthy", "message": "Scholar Paper Search API is running"}
+
+
+@app.post("/search/preview", response_model=PreviewResponse)
+async def preview_search(request: PreviewRequest):
+    """
+    预览搜索：只运行查询扩展和关键词提取，不执行实际搜索。
+    返回扩展查询（用于arXiv）和提取的关键词（用于OpenAlex），
+    供前端展示给用户选择。
+    """
+    try:
+        from search_engine import AcademicTreeSearchEngine
+        engine = AcademicTreeSearchEngine()
+        multi_agent = MultiSearchAgent()
+
+        all_expanded = {}
+        all_keywords_set: set = set()
+        sources = ["arxiv", "openalex"]
+        intent = ""
+        domain = ""
+
+        for query in request.queries:
+            logger.info(f"Preview: expanding query '{query}'")
+            # 1. 运行 LLM 查询扩展
+            result = engine.expand_query(query)
+            expanded = result.get("expanded_queries", [])
+            if query not in expanded:
+                expanded = [query] + expanded
+            all_expanded[query] = expanded
+
+            # 收集意图信息
+            if result.get("suitable_sources"):
+                sources = result["suitable_sources"]
+            if result.get("query_intent"):
+                intent = result["query_intent"]
+            if result.get("domain"):
+                domain = result["domain"]
+
+            # 2. 对每个扩展查询提取 OpenAlex 关键词（expanded 已包含原始查询）
+            try:
+                for eq in expanded:
+                    eq_keywords = multi_agent.extract_keywords(eq, "openalex", max_keywords=4)
+                    for kw in eq_keywords:
+                        all_keywords_set.add(kw)
+            except Exception as ke:
+                logger.error(f"Keyword extraction failed for '{query}': {ke}")
+
+        return PreviewResponse(
+            status="success",
+            expanded_queries=all_expanded,
+            extracted_keywords=sorted(all_keywords_set),
+            suitable_sources=sources,
+            query_intent=intent,
+            domain=domain,
+        )
+    except Exception:
+        logger.error(f"Preview search failed: {traceback.format_exc()}")
+        return PreviewResponse(
+            status="error",
+            expanded_queries={},
+            extracted_keywords=[],
+            suitable_sources=[],
+            query_intent="",
+            domain="",
+        )
 
 @app.post("/search", response_model=SearchResponse)
 async def search_papers(request: SearchRequest):
@@ -472,27 +551,63 @@ def collect_tree_queries(root, valid_ids: set) -> Dict[str, Dict[str, List[str]]
                     return g
         return 'other'
 
+    def _collect_pids(doc_list):
+        """从文档列表中提取有效的 paper_id"""
+        pids = []
+        for doc in doc_list:
+            if not isinstance(doc, dict):
+                continue
+            pid = doc.get('paper_id') or doc.get('arxivId')
+            if pid and pid in valid_ids:
+                pids.append(pid)
+        return pids
+
+    def _add_to_result(node, pids):
+        """将 paper_ids 按节点来源加入分类结果"""
+        if not pids:
+            return
+        group = _get_source_group(node.source)
+        if group not in result:
+            result[group] = {}
+        key = node.query_str
+        if key in result[group]:
+            result[group][key].extend(pids)
+        else:
+            result[group][key] = pids
+
+    covered_ids = set()
+
     def _traverse(node):
-        if node.query_str and node.docs:
-            matched = []
-            for doc in node.docs:
-                if not isinstance(doc, dict):
-                    continue
-                pid = doc.get('paper_id') or doc.get('arxivId')
-                if pid and pid in valid_ids:
-                    matched.append(pid)
-            if matched:
-                group = _get_source_group(node.source)
-                if group not in result:
-                    result[group] = {}
-                if node.query_str in result[group]:
-                    result[group][node.query_str].extend(matched)
-                else:
-                    result[group][node.query_str] = matched
+        if node.query_str:
+            # 从相关论文收集
+            if node.docs:
+                pids = _collect_pids(node.docs)
+                _add_to_result(node, pids)
+                covered_ids.update(pids)
+            # 从不相关论文收集（这些论文也经过了评分，有 sim_score）
+            if node.irrelevant_docs:
+                pids = _collect_pids(node.irrelevant_docs)
+                _add_to_result(node, pids)
+                covered_ids.update(pids)
+            # 从引用探索结果收集
+            if hasattr(node, 'relevance_refs') and node.relevance_refs:
+                pids = _collect_pids(node.relevance_refs)
+                _add_to_result(node, pids)
+                covered_ids.update(pids)
+            # 从参考文献收集
+            if hasattr(node, 'references') and node.references:
+                pids = _collect_pids(node.references)
+                _add_to_result(node, pids)
+                covered_ids.update(pids)
         for child in node.children:
             _traverse(child)
 
     _traverse(root)
+
+    # 收集未覆盖的有效论文（来自引用探索、深度搜索等未入节点文档池的论文）
+    uncovered = valid_ids - covered_ids
+    if uncovered:
+        result['other'] = {'未分类': list(uncovered)}
 
     # 去重（每个组内的每个查询的论文ID去重）
     for group, queries in result.items():
@@ -525,12 +640,15 @@ async def _advanced_search(request: SearchRequest, filter_config: dict = None, s
                     similarity_threshold=request.similarity_threshold
                 )
 
-                # 执行搜索（包含完整pipeline）
+                # 执行搜索（包含完整pipeline），支持查询筛选
                 sorted_docs = search_agent.search(
                     query,
                     end_date=request.end_date,
                     filter_params=filter_config,
-                    sort_by=sort_by
+                    sort_by=sort_by,
+                    selected_queries=request.selected_queries,
+                    expanded_queries=request.expanded_queries,
+                    selected_keywords=request.selected_keywords
                 )
 
                 if not sorted_docs:
