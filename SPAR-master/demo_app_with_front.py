@@ -23,6 +23,12 @@ from log import logger
 
 app = FastAPI(title="Scholar Paper Search API with Frontend", version="1.0.0")
 
+from datetime import datetime
+import uuid
+import json
+import os
+
+
 # 请求模型
 class SearchRequest(BaseModel):
     queries: List[str]
@@ -71,6 +77,38 @@ class SearchResponse(BaseModel):
 # 初始化搜索引擎
 multi_search_agent = MultiSearchAgent()
 
+# 历史记录存储文件
+HISTORY_FILE = "./search_history.json"
+class SearchHistoryEntry:
+    def __init__(self, request: SearchRequest, response: SearchResponse):
+        self.id = str(uuid.uuid4())[:8]  # 短ID
+        self.timestamp = datetime.now().isoformat()
+        self.query = request.queries[0] if request.queries else ""  # 取第一个查询作为主标题
+        self.request = request.dict()
+        self.response = response.dict()
+
+def load_history():
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return []
+
+def save_history(history_list):
+    with open(HISTORY_FILE, 'w', encoding='utf-8') as f:
+        json.dump(history_list, f, ensure_ascii=False, indent=2)
+
+# 收藏夹存储文件
+FAVORITES_FILE = "./favorites.json"
+
+def load_favorites():
+    if os.path.exists(FAVORITES_FILE):
+        with open(FAVORITES_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    return []
+
+def save_favorites(favorites):
+    with open(FAVORITES_FILE, 'w', encoding='utf-8') as f:
+        json.dump(favorites, f, ensure_ascii=False, indent=2)
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     """返回前端页面"""
@@ -193,14 +231,75 @@ async def search_papers(request: SearchRequest):
 
         if request.use_advanced_search:
             # 使用高级搜索（包含query改写、意图判断、rerank等完整pipeline）
-            return await _advanced_search(request, filter_config=filter_config, sort_by=request.sort_by)
+            response = await _advanced_search(request, filter_config=filter_config, sort_by=request.sort_by)
         else:
             # 使用简单搜索
-            return await _simple_search(request)
+            response = await _simple_search(request)
+
+        # 保存历史记录（仅当搜索成功且有结果）
+        if response.status == "success":
+            history = load_history()
+            entry = {
+                "id": str(uuid.uuid4())[:8],
+                "timestamp": datetime.now().isoformat(),
+                "query": request.queries[0] if request.queries else "",
+                "request": request.dict(),
+                "response": response.dict()
+            }
+            history.insert(0, entry)
+            if len(history) > 50:
+                history = history[:50]
+            save_history(history)
+
+        return response
+
 
     except Exception as e:
         logger.error(f"Search failed: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+
+@app.get("/history")
+async def get_history():
+    """获取历史记录列表（摘要）"""
+    history = load_history()
+    # 只返回id, query, timestamp，不返回完整数据
+    summaries = [{"id": h["id"], "query": h["query"], "timestamp": h["timestamp"]} for h in history]
+    return {"history": summaries}
+
+@app.get("/history/{history_id}")
+async def get_history_detail(history_id: str):
+    """获取指定历史记录的完整数据"""
+    history = load_history()
+    for entry in history:
+        if entry["id"] == history_id:
+            return entry
+    raise HTTPException(status_code=404, detail="History entry not found")
+
+@app.get("/favorites")
+async def get_favorites():
+    """获取所有收藏的论文"""
+    return {"favorites": load_favorites()}
+
+@app.post("/favorites/{paper_id}")
+async def add_favorite(paper_id: str, paper_data: Dict[str, Any]):
+    """添加论文到收藏夹（需要传入完整的论文数据）"""
+    favorites = load_favorites()
+    # 检查是否已存在
+    existing = next((item for item in favorites if item.get("paper_id") == paper_id), None)
+    if existing:
+        return {"status": "already_exists", "favorites": favorites}
+    # 添加新论文（可以只存储必要字段，但为了简单存储完整数据）
+    favorites.append(paper_data)
+    save_favorites(favorites)
+    return {"status": "added", "favorites": favorites}
+
+@app.delete("/favorites/{paper_id}")
+async def remove_favorite(paper_id: str):
+    """从收藏夹移除论文"""
+    favorites = load_favorites()
+    favorites = [item for item in favorites if item.get("paper_id") != paper_id]
+    save_favorites(favorites)
+    return {"status": "removed", "favorites": favorites}
 
 def standardize_paper_data(paper_data, paper_id=None, source='unknown'):
     """

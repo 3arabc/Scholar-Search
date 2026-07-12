@@ -83,7 +83,7 @@ class MultiSearchAgent:
         model_inp = template_extract_keywords_source_aware.format(
             user_query=query, source=source
         )
-        for _ in range(4):
+        for _ in range(1):
             try:
                 response = get_from_llm(model_inp, model_name=LLM_MODEL_NAME)
                 pattern = r"\[Start\](.*?)\[End\]"
@@ -94,7 +94,9 @@ class MultiSearchAgent:
                     return [kw.strip() for kw in keywords.split(",") if kw.strip()][:limit]
             except:
                 logger.error(f"Failed to extract keywords: {traceback.format_exc()}")
-        return []  # 提取失败返回空，避免用自然语言查询去搜API
+        #return []
+        logger.warning(f"Keyword extraction failed, using original query as keyword: {query}") #wsl-72，无延申词可以使用原关键词搜索
+        return [query]
 
     def _google_arxiv_search(
         self,
@@ -117,7 +119,7 @@ class MultiSearchAgent:
             ) as executor:
                 future_to_query = {
                     executor.submit(
-                        google_search_arxiv_id, query, API_TRY_COUNT, 50, end_date
+                        google_search_arxiv_id, query, API_TRY_COUNT, 15, end_date
                     ): query
                     for query in queries
                 }
@@ -131,7 +133,7 @@ class MultiSearchAgent:
                         )
                         results[query] = []
 
-            logger.debug(f"google_search_arxiv_id results: {results}")
+            logger.info(f"google_search_arxiv_id results: {results}")
 
             # Step 2: 去重 arxiv_ids
             unique_arxiv: Set[str] = set()
@@ -193,7 +195,7 @@ class MultiSearchAgent:
         """Execute OpenAlex search."""
         logger.info(f"Searching OpenAlex for '{keyword}'")
         try:
-            papers = search_paper_via_query_from_openalex(keyword, per_page=20)
+            papers = search_paper_via_query_from_openalex(keyword, per_page=50)  #wsl-77
             logger.info(f"Found {len(papers)} papers for '{keyword}' from OpenAlex")
             return SearchResult(
                 source="openalex", papers=papers, keyword=keyword, raw_query=raw_query
@@ -273,7 +275,7 @@ class MultiSearchAgent:
             logger.info(f"[{source}]: Merging results for raw_query: {raw_query}")
             for result in group:
                 if not result.papers:
-                    logger.debug(f"No papers found in this result: {result}, skipping")
+                    logger.info(f"No papers found in this result: {result}, skipping")
                     continue
 
                 if raw_query not in merged_query2paper:
@@ -303,7 +305,7 @@ class MultiSearchAgent:
 
         for result in results:
             if not result.papers:
-                logger.debug(f"No papers found in this result: {result}, skipping")
+                logger.info(f"No papers found in this result: {result}, skipping")
                 continue
             keyword = result.keyword
             raw_query = result.raw_query
@@ -399,25 +401,42 @@ class MultiSearchAgent:
                         else:
                             source_keywords = self.extract_keywords(query, source)
                         if source_keywords:
+                            # 去重（已存在的跳过）
                             source_keywords_valid = []
                             for one in source_keywords:
                                 if one not in source_keywords_already:
                                     source_keywords_already.append(one)
                                     source_keywords_valid.append(one)
                                 else:
-                                    logger.info(
-                                        f"Keyword '{one}' already exists in source keywords for {source}"
-                                    )
+                                    logger.info(f"Keyword '{one}' already exists in source keywords for {source}")
 
-                            query_keywords_by_source[source][
-                                query
-                            ] = source_keywords_valid
-                            keywords_combine_query[source][query] = "|".join(
-                                source_keywords_valid
-                            )
-                            query_keywords2raw[source][
-                                "|".join(source_keywords_valid)
-                            ] = query
+                            # ---- 新组合逻辑 ----
+                            # 1. 从原始查询中提取核心词（去掉常见停用词，保留有意义的词）
+                            # 简单分词并过滤停用词（这里可以用与之前 extract_keywords 相同的停用词列表）
+                            from global_config import STOPWORDS  # 假设有定义，或直接硬编码
+                            original_words = [w for w in query.lower().split() if w not in STOPWORDS and len(w) > 2]
+                            # 如果原始查询没有核心词（例如太短），则保留整个 query
+                            if not original_words:
+                                original_words = [query]
+
+                            # 2. 过滤扩展关键词：去除与原始查询核心词完全相同的词（避免重复）
+                            filtered_keywords = [kw for kw in source_keywords_valid if
+                                                 kw.lower() not in [w.lower() for w in original_words]]
+
+                            # 3. 从过滤后的扩展词中取前 N 个（例如 3 个），组成组合查询
+                            # 组合查询格式：原始查询 + 选中的扩展词（空格分隔）
+                            # 注意：若过滤后扩展词不足，可以少取
+                            selected = filtered_keywords[:KEYWORDS_COMBINE_NUM]
+                            if selected:
+                                combined_query = query + " " + " ".join(selected)
+                            else:
+                                # 若所有扩展词都与原始词重复，则仅使用原始查询
+                                combined_query = query
+
+                            # 存储为列表（只有一个组合查询）
+                            query_keywords_by_source[source][query] = [combined_query]
+                            keywords_combine_query[source][query] = combined_query
+                            query_keywords2raw[source][combined_query] = query
                             logger.info(
                                 f"Query {query_idx+1}: Got {len(source_keywords_valid)} keywords for {source}"
                             )
@@ -481,7 +500,7 @@ class MultiSearchAgent:
                     merged_results[source] = self._merge_search_results_grouped(
                         results_by_source[source], source
                     )
-        logger.debug(f"merged_results: {merged_results}")
+        logger.info(f"merged_results: {merged_results}")
 
         # Step 5: Merge results from all sources
         final_papers = {}
@@ -490,7 +509,7 @@ class MultiSearchAgent:
         query_keywords2raw = {}
         for source, result in merged_results.items():
             if not result.query2paper:
-                logger.debug(f"result is empty, skip: {result}")
+                logger.info(f"result is empty, skip: {result}")
                 continue
             if source == "arxiv" and result.query2paper:
                 # For Google/ArXiv results which already track query->paper relationships
@@ -512,7 +531,7 @@ class MultiSearchAgent:
 
             else:
                 for query, papers in result.query2paper.items():
-                    logger.debug(f"papers: {len(papers)}: {papers[0]}")
+                    logger.info(f"papers: {len(papers)}: {papers[0]}")
 
                     query_extracted_keywords = result.extra.get(
                         "merged_query_to_keywords", {}
@@ -572,12 +591,12 @@ def _generate_query_from_reference(
         doc_field=one_doc.get("fieldsOfStudy", ""),
     )
 
-    logger.debug(f"_generate_query_from_reference model info: {model_inp}")
+    logger.info(f"_generate_query_from_reference model info: {model_inp}")
 
     for _ in range(LLM_TRY_COUNT):
         try:
             response = get_from_llm(model_inp, model_name=LLM_MODEL_NAME)
-            logger.debug(f"response: {response}")
+            logger.info(f"response: {response}")
             response = fetch_string(response)
             query_list = extract_json(response)
             if query_list is None:
@@ -781,7 +800,7 @@ class AcademicTreeSearchEngine:
                                         4096,
                                         model_name=LLM_MODEL_NAME)
                 response = fetch_string(response)
-                logger.debug(f"query correct response: {response}")
+                logger.info(f"query correct response: {response}")
                 response_new = extract_json(response)
                 if response_new is None:
                     logger.warning("Failed to parse JSON, using defaults")
@@ -1226,12 +1245,12 @@ class AcademicTreeSearchEngine:
             best_response = None
             best_query_count = 0
 
-            logger.debug(f"Expand query prompt for LLM: {prompt}")
+            logger.info(f"Expand query prompt for LLM: {prompt}")
             for attempt in range(LLM_TRY_COUNT):
                 try:
                     response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
                     response = fetch_string(response)
-                    logger.debug(f"Expanded queries response: {response}")
+                    logger.info(f"Expanded queries response: {response}")
 
                     # Parse the response based on its format
                     try:
@@ -1279,7 +1298,7 @@ class AcademicTreeSearchEngine:
                     expanded_queries = self._extract_queries_from_response(
                         parsed_response, prompt_type
                     )
-                    logger.debug(f"Extracted queries: {expanded_queries}")
+                    logger.info(f"Extracted queries: {expanded_queries}")
 
                     if expanded_queries:
                         #wsl-78 ----- 新增：强制添加精确短语查询 -----
@@ -1633,53 +1652,6 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
 
         return output, id2docs, query_source_map, query_keywords2raw
 
-    def search_papers(self, queries, end_date="", searched_docs=dict()):
-        results = {}
-        if end_date == "":
-            end_date = self.current_date
-
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=API_PARALLEL_REQUEST #wsl
-        ) as executor:
-            future_to_query = {
-                executor.submit(
-                    google_search_arxiv_id, query, API_TRY_COUNT, 10, end_date
-                ): query
-                for query in queries
-            }
-            for future in concurrent.futures.as_completed(future_to_query):
-                query = future_to_query[future]
-                try:
-                    results[query] = future.result()
-                except Exception as e:
-                    logger.error(f"Search failed for query {query}: {str(e)}")
-                    results[query] = []
-
-        logger.debug(f"google_search_arxiv_id: {results}")
-
-        unique_arxiv = set()
-        original_arxiv = []
-        for arxiv_ids in results.values():
-            original_arxiv.extend(arxiv_ids)
-            for arxiv_id in arxiv_ids:
-                if arxiv_id not in searched_docs:
-                    unique_arxiv.add(arxiv_id)
-
-        logger.info(
-            f"original num is: {len(original_arxiv)}, unique num is: {len(list(unique_arxiv))}"
-        )
-
-        id2docs = parallel_search_search_paper_from_arxiv(
-            list(unique_arxiv), max_workers=API_PARALLEL_REQUEST, batch_size=8
-        )
-
-        output = {}
-        for query, arxiv_ids in results.items():
-            output[query] = [
-                id2docs[arxiv_id] for arxiv_id in arxiv_ids if arxiv_id in id2docs
-            ]
-        return output, id2docs
-
     def calculate_sim_bge(
         self, query, docs, search_time="", score_thresh=BEGIN_SIM_THRESHOLD, source=""
     ):
@@ -1909,50 +1881,45 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
     '''def calculate_similarity(
         self, query, docs, search_time="", score_thresh=0.5, source=""
     ):
-        """
-        纯 BGE-M3 embedding 评分（无 LLM）：
-        余弦相似度直接作为 sim_score，>= score_thresh 为相关。
-        """
-        if not docs:
-            return [], []
-
-        doc_texts = [
-            f"Title: {d.get('title', '')}\nAbstract: {d.get('abstract', '')}"
-            for d in docs
-        ]
-
-        start = time.time()
-        q_emb = self._get_bge_embeddings([query])
-        d_embs = self._get_bge_embeddings(doc_texts) if doc_texts else None
-
-        if not q_emb or not d_embs:
-            logger.error("BGE embedding failed, all docs treated as irrelevant")
-            irrelevace_docs = [{
-                "arxivId": d["arxivId"],
-                "paper_id": d.get("paper_id", d.get("arxivId")),
-                "sim_score": 0.0, "source": source,
-                "sim_info_details": {"reason": "BGE embedding failed"},
-            } for d in docs]
-            return [], irrelevace_docs
-
-        qv = q_emb[0]
-        relevace_docs, irrelevace_docs = [], []
-
-        for d, de in zip(docs, d_embs):
-            sim = self._cosine_similarity(qv, de)
-            info = {
-                "arxivId": d["arxivId"],
-                "paper_id": d.get("paper_id", d.get("arxivId")),
-                "sim_score": sim,
-                "source": source,
-                "sim_info_details": {"bge_score": sim, "method": "BGE-M3 cosine"},
+        logger.debug(f"calculate_similarity, query: {query}; doc is: {docs[0].keys()}")
+        relevace_docs = []
+        irrelevace_docs = []
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=LLM_PARREL_NUM
+        ) as executor:
+            future_to_doc = {
+                executor.submit(
+                    _calculate_similarity_with_retry, query, search_time, doc
+                ): doc
+                for doc in docs
             }
-            (relevace_docs if sim >= score_thresh else irrelevace_docs).append(info)
+            for future in concurrent.futures.as_completed(future_to_doc):
+                doc = future_to_doc[future]
+                res = future.result(timeout=2)
+                try:
+                    if res:
+                        doc.update(res)
+                    else:
+                        print(traceback.format_exc())
+                        doc["sim_score"] = -1  # 失败则设为0，这个数据就不要了
+                        doc["sim_info_details"] = {}
+                except:
+                    print(traceback.format_exc())
+                    doc["sim_score"] = -1  # 失败则设为0，这个数据就不要了
+                    doc["sim_info_details"] = {}
+                finally:
+                    simple_info = {
+                        "arxivId": doc["arxivId"],
+                        "paper_id": doc.get("paper_id", doc.get("arxivId")),
+                        "sim_score": doc["sim_score"],
+                        "sim_info_details": doc["sim_info_details"],
+                        "source": source,
+                    }
+                    if doc["sim_score"] >= score_thresh:
+                        relevace_docs.append(simple_info)
+                    else:
+                        irrelevace_docs.append(simple_info)
 
-        logger.info(
-            f"BGE pure scoring: {len(docs)} docs -> {len(relevace_docs)} relevant "
-            f"(threshold={score_thresh}), {time.time()-start:.1f}s"
-        )
         return relevace_docs, irrelevace_docs
         '''
 

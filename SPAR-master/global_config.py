@@ -131,7 +131,14 @@ FILTER_ENABLE_YEAR = True
 FILTER_ENABLE_CITATIONS = True
 
 # 当文档缺少某字段时的处理方式：True 表示该条件通过（即不因此丢弃），False 表示丢弃
-FILTER_MISSING_FIELD_PASS = False
+FILTER_MISSING_FIELD_PASS = True
+KEYWORDS_COMBINE_NUM = 3
+STOPWORDS = {
+    "what", "is", "are", "was", "were", "the", "a", "an", "of", "for", "on", "at", "to", "in", "with", "without",
+    "by", "and", "or", "but", "from", "up", "about", "into", "through", "during", "including", "etc",
+    "papers", "studies", "work", "research", "contribute", "advancement", "which", "how", "why", "when", "where",
+    "can", "could", "would", "should", "might", "may", "does", "do", "is", "are", "has", "have", "been", "being"
+}
 # =============================================================================
 # NETWORK CONFIGURATION
 # =============================================================================
