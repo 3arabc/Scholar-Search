@@ -318,6 +318,7 @@ class AcademicSearchTree:
         next_level,
         search_date,
         current_depth,
+        forced_keywords: list = None,
     ):
         """
         Performs search for all queries at the current level and processes the results.
@@ -339,7 +340,7 @@ class AcademicSearchTree:
         logger.info(
             f"Running query_level_search with {len(expanded_queries)} queries at depth {current_depth}"
         )
-        logger.info(f"expanded_queries: {expanded_queries}")
+        # logger.info(f"expanded_queries: {expanded_queries}")
         # logger.info(f"query_node_relations: {query_node_relations}")
 
         # Determine sources based on expanded_queries_info if available
@@ -383,6 +384,7 @@ class AcademicSearchTree:
                     end_date=search_date,
                     searched_docs=self.root.searched_docs,
                     sources=sources,
+                    forced_keywords=forced_keywords,
                 )
             )
 
@@ -406,7 +408,7 @@ class AcademicSearchTree:
                 else:
                     status = "Finshed"
 
-                logger.info(f"{query} --- query_source: {query_source}: {status}")
+                logger.info(f"{query[:60]}... --- source: {query_source}: {status}" if len(query) > 60 else f"{query} --- source: {query_source}: {status}")
 
                 if query in query_node_relations:
                     assert (
@@ -792,7 +794,8 @@ class AcademicSearchTree:
             self.root.query_str, valid_docs_info, list(self.root.searched_queries)
         )
 
-        logger.info(f"generate {len(new_queries)} queries: {new_queries}")
+        query_samples = [q[:50] for q, _ in new_queries[:3]]
+        logger.info(f"generate {len(new_queries)} queries (samples: {query_samples}{'...' if len(new_queries) > 3 else ''})")
 
         for query, parent_node in new_queries:
             if query not in generate_new_query:
@@ -800,7 +803,7 @@ class AcademicSearchTree:
                 child = SearchNode(query_str=query)
                 nex_level_prepare.append([parent_node, child])
             else:
-                logger.info(f"{query} already generated, skip")
+                logger.debug(f"Query already generated, skip: {query[:40]}")
 
         query_node_relations = {}
         querys_to_next_level = []
@@ -837,7 +840,7 @@ class AcademicSearchTree:
 
         return level_node, search_queue, query_node_relations
 
-    def search(self, initial_query: str, end_date="", filter_params: dict = None, sort_by: str = 'year') -> List:
+    def search(self, initial_query: str, end_date="", filter_params: dict = None, sort_by: str = 'year', selected_queries: list = None, expanded_queries: list = None, selected_keywords: list = None) -> List:
         """
         Main search method that:
         1. Initializes search tree with root query
@@ -868,11 +871,35 @@ class AcademicSearchTree:
             status="INIT",
         )
         self.user_query = initial_query
+        self.forced_keywords = selected_keywords  # 用户预选的关键词（仅 depth=1 生效）
 
         try:
-            # Start with query fusion to generate initial queries
-            # Instead of a list of nodes, now query_fusion returns a list of query strings
-            expanded_queries, query_node_relations = self.query_fusion()
+            # 如果传入了预生成的扩展查询（来自预览阶段），直接使用，跳过 query_fusion
+            if expanded_queries is not None:
+                logger.info(f"Using pre-generated expanded queries ({len(expanded_queries)} queries)")
+                query_node_relations = {}
+                for q in expanded_queries:
+                    node = SearchNode(query_str=q, status="START")
+                    query_node_relations[q] = {"own_node": node, "parent_node": self.root}
+                self.root.extra["expanded_queries_info"] = {
+                    "suitable_sources": ["arxiv", "openalex"],
+                    "expanded_queries": expanded_queries,
+                }
+            else:
+                # Start with query fusion to generate initial queries
+                expanded_queries, query_node_relations = self.query_fusion()
+
+            # 如果用户指定了 selected_queries，只保留选中的查询
+            if selected_queries is not None:
+                selected_set = set(selected_queries)
+                filtered = [q for q in expanded_queries if q in selected_set]
+                if filtered:
+                    logger.info(f"Using {len(filtered)}/{len(expanded_queries)} selected queries")
+                    expanded_queries = filtered
+                    query_node_relations = {k: v for k, v in query_node_relations.items() if k in selected_set}
+                else:
+                    logger.warning(f"No selected queries matched expanded queries, using all {len(expanded_queries)}")
+
             search_queue = deque([expanded_queries])
 
             # Track search progress
@@ -901,7 +928,19 @@ class AcademicSearchTree:
                     next_level,
                     self.search_date,
                     current_depth,
+                    forced_keywords=self.forced_keywords if current_depth == 1 else None,
                 )
+
+                # ===== 每层评分后立即过滤低分论文 =====
+                if self.root.searched_docs and self.sim_threshold > 0:
+                    before = len(self.root.searched_docs)
+                    self.root.searched_docs = {
+                        pid: doc for pid, doc in self.root.searched_docs.items()
+                        if doc.get('sim_score', 0) is not None and doc.get('sim_score', 0) >= self.sim_threshold
+                    }
+                    after = len(self.root.searched_docs)
+                    if after < before:
+                        logger.info(f"Depth {current_depth} sim filter: {before} → {after} docs")
 
                 # Check if we've found enough documents
                 if self.meet_stop_condition(current_depth):
@@ -1007,8 +1046,8 @@ class AcademicSearchTree:
                         all_docs, self.user_query, score_name="sim_score",sort_by=sort_by
                     )
                     if reranked_list:
-                        # 截断到 MAX_DOCS（保持排序顺序）
-                        reranked_list = reranked_list[:MAX_DOCS]
+                        # 截断到 self.max_docs（保持排序顺序）
+                        reranked_list = reranked_list[:self.max_docs]
                         # 构建有序字典（Python 3.7+ 保留插入顺序）
                         new_searched = {}
                         for doc in reranked_list:
@@ -1032,7 +1071,7 @@ class AcademicSearchTree:
                             filtered = {}
                             kept = 0
                             for doc_id, doc in sorted_items:
-                                if doc.get('sim_score', 0.0) >= SIM_THRESHOLD and kept < MAX_DOCS:
+                                if doc.get('sim_score', 0.0) >= SIM_THRESHOLD and kept < self.max_docs:
                                     filtered[doc_id] = doc
                                     kept += 1
                             self.root.searched_docs = filtered
@@ -1048,11 +1087,11 @@ class AcademicSearchTree:
                     filtered = {}
                     kept = 0
                     for doc_id, doc in sorted_items:
-                        if doc.get('sim_score', 0.0) >= SIM_THRESHOLD and kept < MAX_DOCS:
+                        if doc.get('sim_score', 0.0) >= SIM_THRESHOLD and kept < self.max_docs:
                             filtered[doc_id] = doc
                             kept += 1
                     self.root.searched_docs = filtered
-                    logger.info(f"Final filter: kept {kept} docs (threshold={SIM_THRESHOLD}, max={MAX_DOCS})")
+                    logger.info(f"Final filter: kept {kept} docs (threshold={SIM_THRESHOLD}, max={self.max_docs})")
 
             # 最后返回结果（需修改 _collect_results 避免打乱顺序）
             return self._collect_results()
