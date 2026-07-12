@@ -423,6 +423,101 @@
             margin-right: 4px;
         }
 
+        /* ===== 引用格式展示 ===== */
+        .cite-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 5px 12px;
+            margin-top: 8px;
+            border: 1.5px solid #d1d5db;
+            border-radius: 6px;
+            background: white;
+            color: #4f46e5;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .cite-btn:hover {
+            background: #eef2ff;
+            border-color: #818cf8;
+        }
+        .cite-btn.active {
+            background: #4f46e5;
+            color: white;
+            border-color: #4f46e5;
+        }
+        .citation-box {
+            margin-top: 10px;
+            padding: 12px 14px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 13px;
+        }
+        .citation-tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+        .citation-tab {
+            padding: 4px 10px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            background: white;
+            color: #6b7280;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .citation-tab:hover {
+            background: #f3f4f6;
+        }
+        .citation-tab.active {
+            background: #4f46e5;
+            color: white;
+            border-color: #4f46e5;
+        }
+        .citation-text {
+            padding: 10px 12px;
+            background: white;
+            border: 1px solid #e5e7eb;
+            border-radius: 4px;
+            font-size: 13px;
+            line-height: 1.6;
+            color: #374151;
+            word-break: break-word;
+            margin-bottom: 8px;
+            min-height: 40px;
+        }
+        .citation-text-placeholder {
+            color: #9ca3af;
+            font-style: italic;
+        }
+        .copy-cite-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            border: 1px solid #10b981;
+            border-radius: 4px;
+            background: white;
+            color: #10b981;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .copy-cite-btn:hover {
+            background: #10b981;
+            color: white;
+        }
+        .copy-cite-btn.copied {
+            background: #10b981;
+            color: white;
+            border-color: #10b981;
+        }
+
         .search-tree-section {
             margin-top: 30px;
             padding: 20px;
@@ -453,6 +548,219 @@
             padding: 15px;
             border-radius: 8px;
             margin: 20px 0;
+        }
+
+        /* ===== 分类筛选栏 ===== */
+        .category-bar {
+            margin: 20px 0;
+            padding: 16px 20px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 10px;
+        }
+        .category-bar-inner {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+        }
+        .category-group-label {
+            width: 100%;
+            font-size: 12px;
+            font-weight: 600;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin: 4px 0 2px 0;
+        }
+        .category-group-label:first-of-type {
+            margin-top: 0;
+        }
+        .category-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 5px 12px;
+            border: 1.5px solid #d1d5db;
+            border-radius: 20px;
+            background: white;
+            color: #374151;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            user-select: none;
+            text-align: left;
+            max-width: 260px;
+        }
+        .category-chip:hover {
+            border-color: #818cf8;
+            background: #eef2ff;
+            color: #4f46e5;
+        }
+        .category-chip.active {
+            border-color: #4f46e5;
+            background: #4f46e5;
+            color: white;
+        }
+        .category-chip.active:hover {
+            background: #4338ca;
+            border-color: #4338ca;
+        }
+        .category-chip-all {
+            font-weight: 500;
+        }
+        .chip-count {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 18px;
+            height: 18px;
+            padding: 0 5px;
+            border-radius: 10px;
+            background: #e5e7eb;
+            color: #6b7280;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .category-chip.active .chip-count {
+            background: rgba(255,255,255,0.25);
+            color: white;
+        }
+        .category-chip-all .chip-count {
+            background: #e0e7ff;
+            color: #4f46e5;
+        }
+
+        /* ===== 查询选择面板 ===== */
+        .query-selector {
+            display: none;
+            padding: 30px 40px;
+            border-top: 1px solid #e5e7eb;
+        }
+        .query-selector.show {
+            display: block;
+        }
+        .qs-header {
+            margin-bottom: 20px;
+        }
+        .qs-header h2 {
+            color: #1f2937;
+            margin-bottom: 6px;
+        }
+        .qs-header p {
+            color: #6b7280;
+            font-size: 14px;
+        }
+        .qs-original {
+            background: #f0f9ff;
+            border: 1px solid #0ea5e9;
+            border-radius: 6px;
+            padding: 10px 14px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            color: #0369a1;
+        }
+        .qs-section {
+            margin-bottom: 20px;
+        }
+        .qs-group-label {
+            font-weight: 600;
+            font-size: 14px;
+            color: #374151;
+            margin-bottom: 10px;
+            padding-bottom: 6px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .qs-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .qs-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 7px 14px;
+            border: 1.5px solid #d1d5db;
+            border-radius: 8px;
+            background: white;
+            font-size: 13px;
+            color: #374151;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            user-select: none;
+        }
+        .qs-item:hover {
+            border-color: #818cf8;
+            background: #eef2ff;
+        }
+        .qs-item.checked {
+            border-color: #4f46e5;
+            background: #eef2ff;
+        }
+        .qs-item input[type="checkbox"] {
+            width: 14px;
+            height: 14px;
+            accent-color: #4f46e5;
+            cursor: pointer;
+        }
+        .qs-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-top: 24px;
+            padding-top: 20px;
+            border-top: 1px solid #e5e7eb;
+            flex-wrap: wrap;
+        }
+        .qs-btn {
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            border: 1.5px solid #d1d5db;
+            background: white;
+            color: #374151;
+        }
+        .qs-btn:hover {
+            background: #f3f4f6;
+        }
+        .qs-btn.primary {
+            background: #4f46e5;
+            color: white;
+            border-color: #4f46e5;
+            font-weight: 600;
+            padding: 10px 28px;
+            font-size: 15px;
+        }
+        .qs-btn.primary:hover {
+            background: #4338ca;
+        }
+        .qs-btn.primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .qs-btn.back {
+            color: #6b7280;
+            margin-right: auto;
+        }
+        .qs-count {
+            font-size: 13px;
+            color: #9ca3af;
+            margin-left: 8px;
+        }
+        .qs-loading {
+            display: none;
+            text-align: center;
+            padding: 60px 40px;
+        }
+        .qs-loading.show {
+            display: block;
+        }
+        .qs-loading .spinner {
+            width: 36px;
+            height: 36px;
         }
     </style>
 </head>
@@ -515,10 +823,10 @@
                                 <option value="10" selected>10</option>
                                 <option value="15">15</option>
                                 <option value="20">20</option>
-                                <option value="30">20</option>
-                                <option value="40">20</option>
-                                <option value="50">20</option>
-                                <option value="100">20</option>
+                                <option value="30">30</option>
+                                <option value="50">50</option>
+                                <option value="100">100</option>
+                                <option value="200">200</option>
                             </select>
                         </div>
                         <div>
@@ -619,6 +927,9 @@
                     <div class="help-text" style="margin-top: 5px;">选择搜索结果排序的主要依据。</div>
                 </div>
             </div>
+            <button type="button" id="applyFilterBtn" onclick="onSortOrFilterChange()" style="width:100%; margin-bottom:20px; padding:8px 16px; background:#4f46e5; color:white; border:none; border-radius:6px; cursor:pointer; font-size:14px; font-weight:500;">
+                🔄 更新排序和筛选
+            </button>
             <button type="submit" class="search-btn" id="searchBtn">
                 🔍 Search Papers
             </button>
@@ -627,6 +938,29 @@
         <div class="loading" id="loading">
             <div class="spinner"></div>
             <p>Searching across academic databases...</p>
+        </div>
+
+        <!-- 查询选择面板（预览模式） -->
+        <div class="query-selector" id="querySelector">
+            <div class="qs-loading" id="qsLoading">
+                <div class="spinner"></div>
+                <p>🔍 正在分析查询意图...</p>
+            </div>
+            <div id="qsContent" style="display:none;">
+                <div class="qs-header">
+                    <h2>🔬 选择要执行的查询和关键词</h2>
+                    <p>系统已分析您的查询意图并生成了以下扩展查询和关键词，请选择您希望执行的搜索项。</p>
+                </div>
+                <div class="qs-original" id="qsOriginal"></div>
+                <div id="qsBody"></div>
+                <div class="qs-actions">
+                    <button class="qs-btn back" onclick="cancelSearch()">← 返回修改</button>
+                    <button class="qs-btn" onclick="selectAllQSCheckboxes(true)">全选</button>
+                    <button class="qs-btn" onclick="selectAllQSCheckboxes(false)">取消全选</button>
+                    <span id="qsSelectedCount" class="qs-count">已选 0 项</span>
+                    <button class="qs-btn primary" id="qsStartBtn" onclick="executeSearch()">🔍 开始搜索</button>
+                </div>
+            </div>
         </div>
 
         <div class="results" id="results">
@@ -647,6 +981,11 @@
 
             <div class="stats" id="stats"></div>
 
+            <!-- 分类筛选栏（由 JS 动态渲染） -->
+            <div class="category-bar" id="categoryBar" style="display:none;">
+                <div class="category-bar-inner" id="categoryBarInner"></div>
+            </div>
+
             <div class="search-tree-section" id="searchTreeSection">
                 <h3>🌳 Search Tree Structure</h3>
                 <div class="tree-visualization" id="treeVisualization"></div>
@@ -661,6 +1000,7 @@
         let currentSearchMode = 'advanced';
         let favoritesSet = new Set();  // 存储已收藏的 paper_id
         let currentFavorites = [];     // 缓存完整收藏列表
+        let previewData = null;
 
         // 等待DOM完全加载
         document.addEventListener('DOMContentLoaded', function() {
@@ -669,7 +1009,8 @@
             // 验证所有必需的DOM元素是否存在
             const requiredElements = [
                 'searchForm', 'searchBtn', 'loading', 'results',
-                'stats', 'queryResults', 'searchMode', 'searchTreeSection', 'treeVisualization'
+                'stats', 'queryResults', 'searchMode', 'searchTreeSection', 'treeVisualization',
+                'categoryBar', 'categoryBarInner'
             ];
 
             let missingElements = [];
@@ -804,43 +1145,236 @@
 
             searchData.sort_by = sortBy;
 
-            // Show loading - 验证元素存在
+            // Show loading
             console.log('🔄 Starting to show loading state...');
 
             const searchBtn = document.getElementById('searchBtn');
             const loading = document.getElementById('loading');
             const results = document.getElementById('results');
+            const querySelector = document.getElementById('querySelector');
 
             // 验证关键元素存在
-            if (!searchBtn) {
-                console.error('❌ searchBtn element not found!');
-                alert('Search button not found. Please refresh the page.');
-                return;
-            }
-            if (!loading) {
-                console.error('❌ loading element not found!');
-                alert('Loading element not found. Please refresh the page.');
-                return;
-            }
-            if (!results) {
-                console.error('❌ results element not found!');
-                alert('Results element not found. Please refresh the page.');
+            if (!searchBtn || !loading || !results || !querySelector) {
+                console.error('❌ Required element not found!');
+                alert('Page elements not found. Please refresh.');
                 return;
             }
 
-            searchBtn.disabled = true;
-            loading.style.display = 'block';
+            // 隐藏之前的结果和选择面板
             results.style.display = 'none';
-            console.log('✅ Loading state set');
+            querySelector.classList.remove('show');
+            document.getElementById('qsContent').style.display = 'none';
+            document.getElementById('qsLoading').classList.remove('show');
+
+            searchBtn.disabled = true;
+
+            if (useAdvanced) {
+                // ===== 高级模式：两阶段（预览 → 选择 → 执行）=====
+                try {
+                    // 阶段1：调用预览接口获取扩展查询和关键词
+                    loading.querySelector('p').textContent = '🔍 正在分析查询意图...';
+                    loading.style.display = 'block';
+
+                    console.log('🚀 Fetching search preview...');
+                    const previewResp = await fetch('/search/preview', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ queries: queries })
+                    });
+
+                    if (!previewResp.ok) {
+                        throw new Error(`Preview failed: ${previewResp.status}`);
+                    }
+
+                    previewData = await previewResp.json();
+                    console.log('📋 Preview data:', previewData);
+
+                    // 隐藏loading，显示选择面板
+                    loading.style.display = 'none';
+                    showQueryPreview(searchData);
+
+                } catch (previewError) {
+                    console.error('❌ Preview error:', previewError);
+                    // 预览失败，回退到直接搜索（不传 selected_queries）
+                    loading.querySelector('p').textContent = '⚠️ 意图分析失败，直接执行搜索...';
+                    await executeFullSearch(searchData);
+                }
+                return; // 等待用户选择后再执行
+            }
+
+            // ===== 简单模式：直接搜索 =====
+            loading.style.display = 'block';
+            await executeFullSearch(searchData);
+        }
+
+        // ===== 查询选择面板相关函数 =====
+
+        /** 显示查询选择面板 */
+        function showQueryPreview(searchData) {
+            const qs = document.getElementById('querySelector');
+            const qsContent = document.getElementById('qsContent');
+            const qsLoading = document.getElementById('qsLoading');
+            const qsBody = document.getElementById('qsBody');
+            const qsOriginal = document.getElementById('qsOriginal');
+
+            qsLoading.classList.remove('show');
+            qsContent.style.display = 'block';
+
+            // 显示原始查询
+            const origQueries = previewData.expanded_queries ? Object.keys(previewData.expanded_queries) : [];
+            qsOriginal.textContent = '📝 原始查询: ' + origQueries.join(' | ');
+
+            // 渲染选择项
+            let bodyHtml = '';
+
+            // 1. arXiv 扩展查询
+            let allQueries = [];
+            if (previewData.expanded_queries) {
+                for (const [origQuery, expandedList] of Object.entries(previewData.expanded_queries)) {
+                    bodyHtml += `<div class="qs-section">`;
+                    bodyHtml += `<div class="qs-group-label">🅰 arXiv 扩展查询（来自: "${origQuery}"）</div>`;
+                    bodyHtml += `<div class="qs-grid">`;
+                    for (const eq of expandedList) {
+                        allQueries.push(eq);
+                        bodyHtml += `<label class="qs-item checked">
+                            <input type="checkbox" data-type="query" checked value="${eq.replace(/"/g, '&quot;')}"> ${eq}
+                        </label>`;
+                    }
+                    bodyHtml += `</div></div>`;
+                }
+            }
+
+            // 2. OpenAlex 关键词
+            if (previewData.extracted_keywords && previewData.extracted_keywords.length > 0) {
+                bodyHtml += `<div class="qs-section">`;
+                bodyHtml += `<div class="qs-group-label">🅾 OpenAlex 关键词</div>`;
+                bodyHtml += `<div class="qs-grid">`;
+                for (const kw of previewData.extracted_keywords) {
+                    bodyHtml += `<label class="qs-item checked">
+                        <input type="checkbox" data-type="keyword" checked value="${kw.replace(/"/g, '&quot;')}"> ${kw}
+                    </label>`;
+                }
+                bodyHtml += `</div></div>`;
+            }
+
+            // 3. 意图信息
+            if (previewData.query_intent || previewData.domain) {
+                bodyHtml += `<div class="qs-section" style="font-size:13px;color:#6b7280;">`;
+                bodyHtml += `🎯 意图: ${previewData.query_intent || '通用'} &nbsp;|&nbsp; `;
+                bodyHtml += `📂 领域: ${previewData.domain || '未识别'}`;
+                bodyHtml += `</div>`;
+            }
+
+            qsBody.innerHTML = bodyHtml;
+            qs.classList.add('show');
+
+            // 绑定 checkbox 点击事件更新计数
+            qsBody.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+                cb.addEventListener('change', updateQSSelectedCount);
+            });
+            updateQSSelectedCount();
+
+            // 滚动到选择面板
+            qs.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        /** 更新已选数量 */
+        function updateQSSelectedCount() {
+            const checked = document.querySelectorAll('#qsBody input[type="checkbox"]:checked').length;
+            const total = document.querySelectorAll('#qsBody input[type="checkbox"]').length;
+            const countEl = document.getElementById('qsSelectedCount');
+            if (countEl) countEl.textContent = `已选 ${checked}/${total} 项`;
+        }
+
+        /** 全选/取消全选 */
+        function selectAllQSCheckboxes(select) {
+            document.querySelectorAll('#qsBody input[type="checkbox"]').forEach(cb => {
+                cb.checked = select;
+                const label = cb.closest('.qs-item');
+                if (label) label.classList.toggle('checked', select);
+            });
+            updateQSSelectedCount();
+        }
+
+        /** 取消搜索，返回表单 */
+        function cancelSearch() {
+            document.getElementById('querySelector').classList.remove('show');
+            document.getElementById('searchBtn').disabled = false;
+        }
+
+        /** 执行实际搜索（收集选中的查询） */
+        async function executeSearch() {
+            const searchBtn = document.getElementById('searchBtn');
+            const loading = document.getElementById('loading');
+            const qs = document.getElementById('querySelector');
+
+            // 分别收集选中的查询和关键词
+            const selectedQueries = [];
+            const selectedKeywords = [];
+            document.querySelectorAll('#qsBody input[type="checkbox"]:checked').forEach(cb => {
+                if (cb.dataset.type === 'keyword') {
+                    selectedKeywords.push(cb.value);
+                } else {
+                    selectedQueries.push(cb.value);
+                }
+            });
+
+            if (selectedQueries.length === 0 && selectedKeywords.length === 0) {
+                alert('请至少选择一个查询或关键词');
+                return;
+            }
+
+            // 隐藏选择面板，显示 loading
+            qs.classList.remove('show');
+            const totalSelected = selectedQueries.length + selectedKeywords.length;
+            loading.querySelector('p').textContent = `🔍 正在使用 ${selectedQueries.length} 个查询 + ${selectedKeywords.length} 个关键词检索论文...`;
+            loading.style.display = 'block';
+
+            // 构建搜索请求
+            const formData = new FormData(document.getElementById('searchForm'));
+            const totalQueries = formData.get('queries').split('\n').filter(q => q.trim());
+            const searchData = {
+                queries: totalQueries,
+                google_serper_key: formData.get('google_serper_key') || '',
+                use_advanced_search: true,
+                max_depth: parseInt(formData.get('max_depth')) || 1,
+                relevance_doc_num: parseInt(formData.get('relevance_doc_num')) || 10,
+                similarity_threshold: parseFloat(formData.get('similarity_threshold')) || 0.5,
+                end_date: formData.get('end_date') || '',
+                filter_year_start: document.getElementById('filterYearStart')?.value ? parseInt(document.getElementById('filterYearStart').value) : null,
+                filter_year_end: document.getElementById('filterYearEnd')?.value ? parseInt(document.getElementById('filterYearEnd').value) : null,
+                filter_min_citations: document.getElementById('filterMinCitations')?.value ? parseInt(document.getElementById('filterMinCitations').value) : null,
+                filter_fields: document.getElementById('filterFields')?.value ? document.getElementById('filterFields').value.split(',').map(s => s.trim()).filter(Boolean) : [],
+                sort_by: document.getElementById('sortBy')?.value || 'year',
+                selected_queries: selectedQueries.length > 0 ? selectedQueries : null,
+                selected_keywords: selectedKeywords.length > 0 ? selectedKeywords : null,
+                // 传递预览阶段生成的完整扩展查询列表，避免 pipeline 重新生成
+                expanded_queries: (function() {
+                    if (!previewData || !previewData.expanded_queries) return null;
+                    const all = [];
+                    for (const list of Object.values(previewData.expanded_queries)) {
+                        for (const q of list) all.push(q);
+                    }
+                    return all.length > 0 ? all : null;
+                })()
+            };
+
+            searchBtn.disabled = true;
+            await executeFullSearch(searchData);
+        }
+
+        /** 执行完整搜索并显示结果（提取的公共函数） */
+        async function executeFullSearch(searchData) {
+            const searchBtn = document.getElementById('searchBtn');
+            const loading = document.getElementById('loading');
+            const results = document.getElementById('results');
 
             try {
                 console.log('🚀 Sending search request:', searchData);
 
                 const response = await fetch('/search', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(searchData)
                 });
 
@@ -856,8 +1390,6 @@
                 console.log('📊 Response data structure:', {
                     total_papers: data.total_papers,
                     query_results_keys: data.query_results ? Object.keys(data.query_results) : 'undefined',
-                    query_source_map_keys: data.query_source_map ? Object.keys(data.query_source_map) : 'undefined',
-                    search_tree_keys: data.search_tree ? Object.keys(data.search_tree) : 'undefined'
                 });
 
                 currentResults = data;
@@ -869,14 +1401,8 @@
                 showError(`Search failed: ${error.message}`);
             } finally {
                 console.log('🏁 Finally block executing...');
-                if (loading) {
-                    loading.style.display = 'none';
-                    console.log('✅ Loading hidden in finally');
-                }
-                if (searchBtn) {
-                    searchBtn.disabled = false;
-                    console.log('✅ Search button enabled in finally');
-                }
+                if (loading) loading.style.display = 'none';
+                if (searchBtn) searchBtn.disabled = false;
             }
         }
 
@@ -920,6 +1446,216 @@
             }
         }
 
+        // ===== 分类筛选相关状态与函数 =====
+        let selectedCategories = new Set(); // 存储 "group|category" 键
+
+        /** 渲染分类筛选栏 */
+        function renderCategoryBar(data) {
+            const bar = document.getElementById('categoryBar');
+            const inner = document.getElementById('categoryBarInner');
+            const taxonomy = data.category_taxonomy;
+            if (!taxonomy || Object.keys(taxonomy).length === 0) {
+                bar.style.display = 'none';
+                return;
+            }
+
+            const GROUP_LABELS = {
+                queries: '🔍 检索查询 / 关键词',
+                arxiv: '🅰 arXiv 查询',
+                openalex: '🅾 OpenAlex 关键词',
+                pubmed: '🅿 PubMed 主题',
+                other: '📦 其他'
+            };
+
+            let html = `<button class="category-chip category-chip-all active" data-action="all" id="chipAll">📋 全部结果 <span class="chip-count">${data.total_papers || 0}</span></button>`;
+
+            for (const [group, categories] of Object.entries(taxonomy)) {
+                const label = GROUP_LABELS[group] || `📋 ${group}`;
+                html += `<div class="category-group-label">${label}</div>`;
+                for (const [cat, ids] of Object.entries(categories)) {
+                    // 用 data-* 属性传值，避免引号转义问题
+                    const safeGroup = group.replace(/"/g, '');
+                    const safeCat = cat.replace(/"/g, '');
+                    html += `<button class="category-chip" data-group="${safeGroup}" data-category="${safeCat}">${cat} <span class="chip-count">${ids.length}</span></button>`;
+                }
+            }
+
+            inner.innerHTML = html;
+            bar.style.display = 'block';
+            selectedCategories.clear();
+
+            // 使用事件委托监听分类栏点击
+            inner.onclick = function(e) {
+                const chip = e.target.closest('.category-chip');
+                if (!chip) return;
+
+                const action = chip.dataset.action;
+                if (action === 'all') {
+                    // 点击"全部"
+                    selectedCategories.clear();
+                    inner.querySelectorAll('.category-chip').forEach(c => c.classList.remove('active'));
+                    chip.classList.add('active');
+                    if (currentResults) {
+                        updateStatsDisplay(currentResults);
+                        renderQueryResults(currentResults);
+                    }
+                    return;
+                }
+
+                // 点击分类 chip
+                const group = chip.dataset.group;
+                const category = chip.dataset.category;
+                if (!group || !category) return;
+
+                const key = `${group}|${category}`;
+
+                if (selectedCategories.has(key)) {
+                    selectedCategories.delete(key);
+                    chip.classList.remove('active');
+                } else {
+                    selectedCategories.add(key);
+                    chip.classList.add('active');
+                }
+
+                // 更新"全部"按钮状态
+                const allChip = document.getElementById('chipAll');
+                if (allChip) {
+                    allChip.classList.toggle('active', selectedCategories.size === 0);
+                }
+
+                // 根据选中分类重新渲染
+                if (selectedCategories.size === 0) {
+                    if (currentResults) {
+                        updateStatsDisplay(currentResults);
+                        renderQueryResults(currentResults);
+                    }
+                } else if (currentResults) {
+                    const filtered = getFilteredResults();
+                    updateStatsDisplay(filtered);
+                    renderQueryResults(filtered);
+                }
+            };
+        }
+
+        /** 根据当前选中的分类过滤结果 */
+        function getFilteredResults() {
+            if (selectedCategories.size === 0 || !currentResults) return currentResults;
+
+            // 收集选中分类的所有 paper_id
+            const selectedIds = new Set();
+            const taxonomy = currentResults.category_taxonomy || {};
+            for (const key of selectedCategories) {
+                const sepIdx = key.indexOf('|');
+                if (sepIdx === -1) continue;
+                const group = key.substring(0, sepIdx);
+                const category = key.substring(sepIdx + 1);
+                const ids = (taxonomy[group] && taxonomy[group][category]) || [];
+                ids.forEach(id => selectedIds.add(id));
+            }
+
+            // 按 query 过滤
+            const filtered = {
+                ...currentResults,
+                query_results: {},
+                total_papers: selectedIds.size
+            };
+
+            for (const [query, papers] of Object.entries(currentResults.query_results || {})) {
+                const filteredPapers = papers.filter(p => selectedIds.has(p.paper_id));
+                if (filteredPapers.length > 0) {
+                    filtered.query_results[query] = filteredPapers;
+                }
+            }
+
+            return filtered;
+        }
+
+        /** 更新统计栏 */
+        function updateStatsDisplay(data) {
+            const stats = document.getElementById('stats');
+            if (!stats) return;
+            // 重新计算实际显示的论文数（考虑前端过滤）
+            const paperIds = new Set();
+            for (const papers of Object.values(data.query_results || {})) {
+                for (const p of papers) if (p.paper_id) paperIds.add(p.paper_id);
+            }
+            const totalQueries = Object.keys(data.query_results || {}).length;
+            const sourceCount = Object.keys(data.query_source_map || {}).length;
+            stats.innerHTML = `
+                <div class="stat-card">
+                    <div class="stat-number">${paperIds.size}</div>
+                    <div class="stat-label">Total Papers</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${totalQueries}</div>
+                    <div class="stat-label">Queries</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">${sourceCount}</div>
+                    <div class="stat-label">Source Mappings</div>
+                </div>
+            `;
+        }
+
+        /** 渲染查询结果列表 */
+        function renderQueryResults(data) {
+            const queryResultsEl = document.getElementById('queryResults');
+            if (!queryResultsEl) return;
+
+            console.log('📝 Rendering query results...');
+            try {
+                let queryResultsHtml = '';
+
+                if (data.query_results && Object.keys(data.query_results).length > 0) {
+                    for (const [query, papers] of Object.entries(data.query_results)) {
+                        const source = (data.query_source_map && data.query_source_map[query]) || 'unknown';
+
+                        let formattedPapers = '';
+                        if (Array.isArray(papers) && papers.length > 0) {
+                            try {
+                                formattedPapers = papers.map((paper, index) => {
+                                    try {
+                                        return formatPaper(paper);
+                                    } catch (paperError) {
+                                        console.error(`❌ Error formatting paper ${index}:`, paperError);
+                                        return `<div class="paper-item"><div class="error">Error formatting paper ${index + 1}: ${paperError.message}</div></div>`;
+                                    }
+                                }).join('');
+                            } catch (mappingError) {
+                                console.error('❌ Error mapping papers:', mappingError);
+                                formattedPapers = `<div class="paper-item"><div class="error">Error processing papers for query: ${query}</div></div>`;
+                            }
+                        } else {
+                            formattedPapers = '<div class="paper-item">No papers found for this query</div>';
+                        }
+
+                        queryResultsHtml += `
+                            <div class="query-section">
+                                <div class="query-header">
+                                    <div class="query-title">
+                                        📝 ${query}
+                                        <small style="color: #6b7280; font-weight: normal;">(Source: ${source})</small>
+                                    </div>
+                                    <div class="paper-count">${papers.length} papers</div>
+                                </div>
+                                <div class="papers-list">
+                                    ${formattedPapers}
+                                </div>
+                            </div>
+                        `;
+                    }
+                } else {
+                    queryResultsHtml = '<div class="error">No search results found</div>';
+                }
+
+                queryResultsEl.innerHTML = queryResultsHtml;
+                console.log('✅ Query results updated successfully');
+            } catch (queryError) {
+                console.error('❌ Error updating query results:', queryError);
+                queryResultsEl.innerHTML = '<div class="error">Error displaying search results</div>';
+            }
+        }
+
         function displayResults(data) {
             console.log('📈 displayResults called');
             console.log('📊 Data keys:', Object.keys(data));
@@ -942,32 +1678,26 @@
                     }
                 }
 
-                // 第二步：安全地更新stats
+                // 第二步：更新 stats（使用提取的函数）
                 console.log('📊 Updating stats...');
                 try {
-                    const statsHtml = `
-                        <div class="stat-card">
-                            <div class="stat-number">${data.total_papers || 0}</div>
-                            <div class="stat-label">Total Papers</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-number">${Object.keys(data.query_results || {}).length}</div>
-                            <div class="stat-label">Queries</div>
-                        </div>
-                        <div class="stat-card">
-                            <div class="stat-number">${Object.keys(data.query_source_map || {}).length}</div>
-                            <div class="stat-label">Source Mappings</div>
-                        </div>
-                    `;
-
-                    elements.stats.innerHTML = statsHtml;
+                    updateStatsDisplay(data);
                     console.log('✅ Stats updated successfully');
                 } catch (statsError) {
                     console.error('❌ Error updating stats:', statsError);
-                    elements.stats.innerHTML = '<div class="error">Error updating stats</div>';
+                    document.getElementById('stats').innerHTML = '<div class="error">Error updating stats</div>';
                 }
 
-                // 第三步：安全地更新搜索树
+                // 第三步：渲染分类筛选栏
+                console.log('🏷️ Rendering category bar...');
+                try {
+                    renderCategoryBar(data);
+                    console.log('✅ Category bar rendered');
+                } catch (catError) {
+                    console.error('❌ Error rendering category bar:', catError);
+                }
+
+                // 第四步：安全地更新搜索树
                 console.log('🌳 Updating search tree...');
                 try {
                     if (data.search_tree && Object.keys(data.search_tree).length > 0) {
@@ -989,66 +1719,10 @@
                     elements.treeVisualization.innerHTML = '<div class="error">Error displaying search tree</div>';
                 }
 
-                // 第四步：安全地更新查询结果
-                console.log('📝 Updating query results...');
-                try {
-                    let queryResultsHtml = '';
-
-                    if (data.query_results && Object.keys(data.query_results).length > 0) {
-                        console.log('📝 Processing', Object.keys(data.query_results).length, 'queries');
-
-                        for (const [query, papers] of Object.entries(data.query_results)) {
-                            console.log(`📝 Processing query: "${query}" with ${papers.length} papers`);
-                            const source = (data.query_source_map && data.query_source_map[query]) || 'unknown';
-
-                            // 安全地格式化论文
-                            let formattedPapers = '';
-                            if (Array.isArray(papers) && papers.length > 0) {
-                                try {
-                                    formattedPapers = papers.map((paper, index) => {
-                                        try {
-                                            return formatPaper(paper);
-                                        } catch (paperError) {
-                                            console.error(`❌ Error formatting paper ${index}:`, paperError);
-                                            return `<div class="paper-item"><div class="error">Error formatting paper ${index + 1}: ${paperError.message}</div></div>`;
-                                        }
-                                    }).join('');
-                                } catch (mappingError) {
-                                    console.error('❌ Error mapping papers:', mappingError);
-                                    formattedPapers = `<div class="paper-item"><div class="error">Error processing papers for query: ${query}</div></div>`;
-                                }
-                            } else {
-                                formattedPapers = '<div class="paper-item">No papers found for this query</div>';
-                            }
-
-                            queryResultsHtml += `
-                                <div class="query-section">
-                                    <div class="query-header">
-                                        <div class="query-title">
-                                            📝 ${query}
-                                            <small style="color: #6b7280; font-weight: normal;">(Source: ${source})</small>
-                                        </div>
-                                        <div class="paper-count">${papers.length} papers</div>
-                                    </div>
-                                    <div class="papers-list">
-                                        ${formattedPapers}
-                                    </div>
-                                </div>
-                            `;
-                        }
-                    } else {
-                        console.log('⚠️ No query results found');
-                        queryResultsHtml = '<div class="error">No search results found</div>';
-                    }
-
-                    elements.queryResults.innerHTML = queryResultsHtml;
-                    console.log('✅ Query results updated successfully');
-                } catch (queryError) {
-                    console.error('❌ Error updating query results:', queryError);
-                    elements.queryResults.innerHTML = '<div class="error">Error displaying search results</div>';
-                }
-
-                // 第五步：显示结果
+                // 第五步：渲染查询结果（使用提取的函数）
+                console.log('📝 Rendering query results...');
+                renderQueryResults(data);
+                console.log('✅ Query results rendered');
                 console.log('👁️ Showing results...');
                 elements.results.style.display = 'block';
                 console.log('✅ Results shown successfully');
@@ -1082,6 +1756,7 @@
                     'No abstract available';
                 const year = paper.publicationYear || paper.year || 'Unknown year';
                 const paperId = paper.paper_id || paper.arxivId || paper.id || 'No ID';
+                const safeId = (paperId || 'unknown').replace(/[^a-zA-Z0-9_-]/g, '_');
 
                 // 处理论文链接
                 const links = [];
@@ -1152,6 +1827,27 @@
                             ${paper.doi ? `<span>📄 ${paper.doi}</span>` : ''}
                         </div>
                         ${linksHtml}
+                        <div style="margin-top:4px;">
+                            <button class="cite-btn" onclick="toggleCitation('${safeId}')" id="cite-btn-${safeId}">
+                                📝 引用格式
+                            </button>
+                        </div>
+                        <div class="citation-box" id="cite-box-${safeId}" style="display:none;"
+                             data-apa="${(paper.citation_apa || '').replace(/"/g, '&quot;')}"
+                             data-mla="${(paper.citation_mla || '').replace(/"/g, '&quot;')}"
+                             data-chicago="${(paper.citation_chicago || '').replace(/"/g, '&quot;')}"
+                             data-bibtex="${(paper.citation_bibtex || '').replace(/"/g, '&quot;')}"
+                             data-gb7714="${(paper.citation_gb7714 || '').replace(/"/g, '&quot;')}">
+                            <div class="citation-tabs">
+                                <button class="citation-tab active" onclick="switchCitationFormat('${safeId}', 'apa')" data-format="apa">APA</button>
+                                <button class="citation-tab" onclick="switchCitationFormat('${safeId}', 'mla')" data-format="mla">MLA</button>
+                                <button class="citation-tab" onclick="switchCitationFormat('${safeId}', 'chicago')" data-format="chicago">Chicago</button>
+                                <button class="citation-tab" onclick="switchCitationFormat('${safeId}', 'bibtex')" data-format="bibtex">BibTeX</button>
+                                <button class="citation-tab" onclick="switchCitationFormat('${safeId}', 'gb7714')" data-format="gb7714">GB/T 7714</button>
+                            </div>
+                            <div class="citation-text" id="cite-text-${safeId}">${paper.citation_apa || '暂无引用信息'}</div>
+                            <button class="copy-cite-btn" onclick="copyCitation('${safeId}', 'apa')" id="copy-btn-${safeId}">📋 复制</button>
+                        </div>
                     </div>
                 `;
 
@@ -1159,6 +1855,139 @@
                 console.error('❌ Error formatting paper:', error);
                 return `<div class="paper-item"><div class="error">Error formatting paper: ${error.message}</div></div>`;
             }
+        }
+
+        // ===== 引用格式相关函数 =====
+        let activeCitationFormat = {};  // paperId -> 'apa'
+
+        function toggleCitation(safeId) {
+            const box = document.getElementById('cite-box-' + safeId);
+            const btn = document.getElementById('cite-btn-' + safeId);
+            if (!box || !btn) return;
+            const isVisible = box.style.display !== 'none';
+            box.style.display = isVisible ? 'none' : 'block';
+            btn.classList.toggle('active', !isVisible);
+
+            // 默认显示 APA
+            if (!isVisible && !activeCitationFormat[safeId]) {
+                activeCitationFormat[safeId] = 'apa';
+            }
+        }
+
+        function switchCitationFormat(safeId, format) {
+            const box = document.getElementById('cite-box-' + safeId);
+            const textEl = document.getElementById('cite-text-' + safeId);
+            const copyBtn = document.getElementById('copy-btn-' + safeId);
+            if (!box || !textEl || !copyBtn) return;
+
+            // 从 data 属性中读取引用文本
+            const citationText = box.dataset[format] || '';
+            textEl.textContent = citationText || '暂无此格式的引用';
+            activeCitationFormat[safeId] = format;
+
+            // 更新 tab 高亮
+            box.querySelectorAll('.citation-tab').forEach(tab => {
+                tab.classList.toggle('active', tab.dataset.format === format);
+            });
+
+            // 更新 copy 按钮
+            copyBtn.setAttribute('data-format', format);
+            copyBtn.textContent = '📋 复制';
+            copyBtn.classList.remove('copied');
+        }
+
+        function copyCitation(safeId, format) {
+            const textEl = document.getElementById('cite-text-' + safeId);
+            if (!textEl) return;
+
+            const text = textEl.textContent || '';
+            if (!text || text === '暂无此格式的引用') {
+                return;
+            }
+
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = document.getElementById('copy-btn-' + safeId);
+                if (btn) {
+                    btn.textContent = '✅ 已复制';
+                    btn.classList.add('copied');
+                    setTimeout(() => {
+                        btn.textContent = '📋 复制';
+                        btn.classList.remove('copied');
+                    }, 2000);
+                }
+            }).catch(() => {
+                // 降级方案
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                const btn = document.getElementById('copy-btn-' + safeId);
+                if (btn) {
+                    btn.textContent = '✅ 已复制';
+                    btn.classList.add('copied');
+                    setTimeout(() => {
+                        btn.textContent = '📋 复制';
+                        btn.classList.remove('copied');
+                    }, 2000);
+                }
+            });
+        }
+
+        /** 前端重新排序和筛选（无需请求后端） */
+        function onSortOrFilterChange() {
+            if (!currentResults || !currentResults.query_results) return;
+
+            const sortBy = document.getElementById('sortBy')?.value || 'year';
+            const yearStart = document.getElementById('filterYearStart')?.value;
+            const yearEnd = document.getElementById('filterYearEnd')?.value;
+            const minCitations = document.getElementById('filterMinCitations')?.value;
+            const fieldsRaw = document.getElementById('filterFields')?.value;
+
+            const data = JSON.parse(JSON.stringify(currentResults));
+
+            // 提取 4 位年份（arXiv 可能存 "20240715" 格式）
+            const getYearNum = p => {
+                let y = p.publicationYear || p.year;
+                if (!y) return 0;
+                return parseInt(String(y).substring(0, 4)) || 0;
+            };
+
+            for (const [query, papers] of Object.entries(data.query_results)) {
+                let filtered = papers;
+
+                // 年份过滤（只取前 4 位）
+                if (yearStart) filtered = filtered.filter(p => getYearNum(p) >= parseInt(yearStart));
+                if (yearEnd) filtered = filtered.filter(p => getYearNum(p) <= parseInt(yearEnd));
+
+                // 引用数过滤
+                if (minCitations) filtered = filtered.filter(p => (p.citationCount || 0) >= parseInt(minCitations));
+
+                // 领域过滤
+                if (fieldsRaw) {
+                    const fieldList = fieldsRaw.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+                    if (fieldList.length > 0) {
+                        filtered = filtered.filter(p => {
+                            const fs = (p.fieldsOfStudy || '').toLowerCase();
+                            return fieldList.some(f => fs.includes(f));
+                        });
+                    }
+                }
+
+                // 排序（年份也只取前 4 位）
+                filtered.sort((a, b) => {
+                    if (sortBy === 'year') return getYearNum(b) - getYearNum(a);
+                    if (sortBy === 'citations') return (b.citationCount || 0) - (a.citationCount || 0);
+                    if (sortBy === 'similarity') return (b.sim_score || 0) - (a.sim_score || 0);
+                    return 0;
+                });
+
+                data.query_results[query] = filtered;
+            }
+
+            updateStatsDisplay(data);
+            renderQueryResults(data);
         }
 
         function exportResults() {

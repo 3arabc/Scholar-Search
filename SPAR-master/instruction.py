@@ -40,7 +40,7 @@ template_extract_keywords_source_aware = """Extract optimal search keywords from
 - Include chemical/drug names or biological processes where relevant
 
 ### Key Enhancement:
-- **Actively infer synonyms and related technical terms** that are commonly used in this field, even if they do not appear verbatim in the query. For example, if the query mentions "world model", also include "latent dynamics", "state-space model", "predictive model". Similarly, for any domain, use your knowledge of the field to add relevant alternatives.
+- **Only extract core technical terms that appear in or are directly implied by the query.** Do NOT add broad/generic terms (e.g., "machine learning", "deep learning", "natural language processing", "artificial intelligence") unless they are explicitly part of the query. Focus on specific model names, algorithm names, dataset names, and technical concepts directly relevant to the query.
 
 ### Examples by Source:
 - Semantic Scholar: [Start] transformer architecture, attention mechanism, language model fine-tuning[End]

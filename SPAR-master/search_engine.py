@@ -70,8 +70,15 @@ class MultiSearchAgent:
         self.batch_size = batch_size
         self.current_date = "2025-03-24"  # 当前日期，参考你的需求
 
-    def extract_keywords(self, query: str, source: str = "semantic") -> List[str]:
-        """Extract keywords from a query optimized for a specific source."""
+    def extract_keywords(self, query: str, source: str = "semantic", max_keywords: int = None) -> List[str]:
+        """Extract keywords from a query optimized for a specific source.
+
+        Args:
+            query: The search query
+            source: Target search source (e.g. "openalex", "pubmed")
+            max_keywords: Max keywords to return. Defaults to KEY_WORDS_NUM global config.
+        """
+        limit = KEY_WORDS_NUM if max_keywords is None else max_keywords
         query = query.lower()
         model_inp = template_extract_keywords_source_aware.format(
             user_query=query, source=source
@@ -84,7 +91,7 @@ class MultiSearchAgent:
                 if match:
                     keywords = match.group(1).strip()
                     logger.info(f"Extracted keywords for {source}: {keywords}")
-                    return [kw.strip() for kw in keywords.split(",") if kw.strip()][:KEY_WORDS_NUM]
+                    return [kw.strip() for kw in keywords.split(",") if kw.strip()][:limit]
             except:
                 logger.error(f"Failed to extract keywords: {traceback.format_exc()}")
         #return []
@@ -333,6 +340,7 @@ class MultiSearchAgent:
         end_date: str = "",
         searched_docs: dict = {},
         rerank: bool = True,
+        forced_keywords: List[str] = None,
     ) -> Dict[str, Any]:
         """
         Execute parallel search across multiple sources with a list of queries.
@@ -350,7 +358,8 @@ class MultiSearchAgent:
         if not querys:
             logger.error("Query list is empty")
             return {}
-        logger.info(f"Searching with query list: {querys} across sources: {sources}")
+        q_summary = [q[:40] for q in querys[:3]]
+        logger.info(f"Searching {len(querys)} queries across {sources}: {q_summary}{'...' if len(querys) > 3 else ''}")
 
         # Validate sources
         search_funcs = {
@@ -385,9 +394,12 @@ class MultiSearchAgent:
                     source_keywords_already = []
                     # Process each query separately
                     for query_idx, query in enumerate(querys):
-                        # Extract keywords optimized for this specific source and query
-                        source_keywords = self.extract_keywords(query, source)
-                        ##wsl-711：修改为关键词组合查询
+                        # 如果传入了预选关键词，直接使用（跳过 LLM 提取）
+                        if forced_keywords is not None:
+                            source_keywords = forced_keywords
+                            logger.info(f"Using {len(forced_keywords)} pre-selected keywords for {source} (skipping LLM)")
+                        else:
+                            source_keywords = self.extract_keywords(query, source)
                         if source_keywords:
                             # 去重（已存在的跳过）
                             source_keywords_valid = []
@@ -426,7 +438,8 @@ class MultiSearchAgent:
                             keywords_combine_query[source][query] = combined_query
                             query_keywords2raw[source][combined_query] = query
                             logger.info(
-                                f"Query {query_idx + 1}: Combined query: '{combined_query}' (original: '{query}')")
+                                f"Query {query_idx+1}: Got {len(source_keywords_valid)} keywords for {source}"
+                            )
                         else:
                             # Fallback to default keywords if extraction fails
                             query_keywords_by_source[source][query] = [query]
@@ -532,11 +545,10 @@ class MultiSearchAgent:
                     final_papers.update({paper["paper_id"]: paper for paper in papers})
 
         logger.info(f"All retrieved papers: {len(final_papers)}")
-        logger.info(
-            f"Retrieved papers details: {[{query:len(final_query2docs[query])} for query in final_query2docs]}"
-        )
-        logger.info(f"Query source mapping: {query_source_map}")
-        logger.info(f"Query keywords2raw: {query_keywords2raw}")
+        details = ", ".join([f"{q[:30]}:{len(final_query2docs[q])}" for q in list(final_query2docs)[:5]])
+        logger.info(f"Retrieved papers: {details}{'...' if len(final_query2docs) > 5 else ''}")
+        logger.debug(f"Query source mapping: {query_source_map}")
+        logger.debug(f"Query keywords2raw: {query_keywords2raw}")
 
         # Return the query-source mapping along with the results
         return final_query2docs, final_papers, query_source_map, query_keywords2raw
@@ -1182,11 +1194,7 @@ class AcademicTreeSearchEngine:
             current_year = datetime.now().year
             previous_year = current_year - 1
 
-            # wsl-76------ 强制使用 PASA 模板 -----
-            logger.info(f"Using forced PASA template for query expansion")
-            prompt = template_query_fusion_pasa.format(user_query=query)
-            prompt_type = "pasa"
-            '''
+            # wsl-76 根据查询分析选择合适的模板
             # Determine the appropriate template based on query analysis
             if FUSION_TEMPLATE == "AUTOMATIC" and  self._is_survey_focused(intent):
                 # For survey-focused queries, prioritize finding comprehensive reviews
@@ -1232,7 +1240,6 @@ class AcademicTreeSearchEngine:
                     user_input_N=5, user_query=query, intent=intent, domain=domain
                 )
                 prompt_type = "domain"
-            '''
 
             # Track attempts and keep best result
             best_response = None
@@ -1611,7 +1618,8 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
             return len(domain_lower.split()) >= 2  # More conservative fallback
 
     def search_papers_mroute(
-        self, queries, end_date="", searched_docs=dict(), sources=["google"]
+        self, queries, end_date="", searched_docs=dict(), sources=["google"],
+        forced_keywords: List[str] = None,
     ):
         # sources = ["google", "openalex"]
         output, id2docs, query_source_map, query_keywords2raw = (
@@ -1620,6 +1628,7 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
                 end_date=end_date,
                 searched_docs=searched_docs,
                 sources=sources,
+                forced_keywords=forced_keywords,
             )
         )
         #wsl-77 ===== 新增：对每个查询的结果进行 BGE 重排序 =====
@@ -1746,7 +1755,7 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
         return relevace_docs, irrelevace_docs
     '''
     def rerank_score_bge(self, query, docs):
-        logger.info("rerank_score_bge ...")
+        logger.debug("rerank_score_bge ...")
 
         golden_paper_info = [
             "Title:{}\nAbstract:{}Authors:{}".format(
@@ -1786,7 +1795,7 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
     '''
     #wsl-77在 BGE 向量相似度重排序的基础上，对标题中包含查询核心术语（如模型名、专有名词）的论文给予额外加分
     def rerank_score_bge(self, query, docs):
-        logger.info("rerank_score_bge ...")
+        logger.debug("rerank_score_bge ...")
 
         # ----- 步骤1: 从查询中提取核心术语（保留专有名词、模型名等） -----
         import re
@@ -1813,7 +1822,7 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
         uppercase_terms = re.findall(r'\b([A-Z][A-Za-z0-9_\-]*)\b', query)
         core_terms.update([t.lower() for t in uppercase_terms if len(t) > 1])
 
-        logger.info(f"Core terms for title bonus: {core_terms}")
+        logger.debug(f"Core terms for title bonus: {core_terms}")
 
         # ----- 构建增强的文档表示（标题重复，摘要保留）-----
         golden_paper_info = []
