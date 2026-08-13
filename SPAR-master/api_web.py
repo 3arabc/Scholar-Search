@@ -9,7 +9,7 @@
 from Bio import Entrez
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
-from global_config import GOOGLE_SERPER_KEY, PROXIES, ARXIV_CLIENT
+from global_config import GOOGLE_SERPER_KEY, PROXIES, ARXIV_CLIENT, OPENALEX_API_KEY
 from local_db_v2 import db_path, ArxivDatabase
 from log import logger
 from typing import Optional, Dict, List, Any  # 引入类型提示
@@ -24,7 +24,7 @@ import requests
 import time
 import traceback
 
-Entrez.email = "3453252699@qq.com"  # 替换为你的邮箱
+Entrez.email = "1576385687@qq.com"  # 替换为你的邮箱
 
 def fetch_pubmed_json(pmid_list):
     """
@@ -341,7 +341,12 @@ def fetch_reference_openalex(ref_id):
     """获取单个文献的详细信息"""
     try:
         ref_url = f"https://api.openalex.org/works/{ref_id}"
-        ref_response = requests.get(ref_url)
+        #ref_response = requests.get(ref_url)
+        #wsl
+        ref_params = {}
+        if OPENALEX_API_KEY:
+            ref_params["api_key"] = OPENALEX_API_KEY
+        ref_response = requests.get(ref_url, params=ref_params)
 
         if ref_response.status_code != 200:
             logger.error(
@@ -431,6 +436,13 @@ def search_doc_via_url_from_openalex(data):
     for ref_id in referenced_works:
         try:
             ref_url = f"https://api.openalex.org/works/{ref_id}"
+            # wsl
+            ref_params = {}
+            if OPENALEX_API_KEY:
+                ref_params["api_key"] = OPENALEX_API_KEY
+            ref_response = requests.get(ref_url, params=ref_params, timeout=10)
+            # ref_response = requests.get(ref_url, timeout=10)
+
             ref_response = requests.get(ref_url, timeout=10)
             if ref_response.status_code == 200:
                 ref_data = ref_response.json()
@@ -539,7 +551,7 @@ def search_doc_via_url_from_openalex(data):
 
 
 def search_paper_via_query_from_openalex(
-    keyword, page=1, per_page=10, search_reference=False
+    keyword, page=1, per_page=50, search_reference=False
 ):
     """从openalex获取相关论文，要输入关键词，不支持自然语言的输入，效果不好"""
     try:
@@ -795,7 +807,7 @@ def search_paper_via_query_from_semantic(query, max_paper_num=15, end_date=None)
     return {}
 
 
-def google_search_arxiv_id(query, try_num=4, num=10, end_date=""):
+def google_search_arxiv_id(query, try_num=4, num=20, end_date=""):
     """从google搜索arxiv id，使用api"""
     import urllib.parse
     
@@ -1064,7 +1076,7 @@ def search_paper_from_arxiv_by_arxiv_id_bsz(arxiv_ids, max_retries=3):
             try:
                 results = list(ARXIV_CLIENT.results(search))
                 for result in results:
-                    logger.info(f"Arxiv success paper: {result.title}")
+                    logger.debug(f"Arxiv success paper: {result.title}")
             except arxiv.HTTPError as e:
                 logger.error(f"Arxiv HTTP Error: {e}")
 

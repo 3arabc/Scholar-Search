@@ -13,8 +13,22 @@ logging_file_path = os.path.join(log_dir, f"search_pipe_{current_date}.log")
 
 # logging_file_path = os.path.join(log_dir, f"server_pipe_test.log")
 
-# Configure handlers
-handlers = [logging.FileHandler(logging_file_path), logging.StreamHandler(sys.stdout)]
+# ── 全局修复：Windows 下 GBK 编码无法处理 UTF-8 字符（中文字符等）──
+# 将 stdout/stderr 及日志文件的编码统一为 UTF-8，避免 UnicodeEncodeError
+if sys.platform == "win32":
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream and hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+# Configure handlers with explicit UTF-8 encoding
+handlers = [
+    logging.FileHandler(logging_file_path, encoding="utf-8"),
+    logging.StreamHandler(sys.stdout),
+]
 
 # Set logging level (DEBUG overrides INFO)
 level = logging.INFO

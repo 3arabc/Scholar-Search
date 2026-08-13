@@ -26,6 +26,7 @@ class SearchNode:
         parent: Optional["SearchNode"] = None,
         source: List[str] = None,
         raw_query: str= "",
+        reranker: Optional["Reranker"] = None,  # wsl<--- 新增参数
         **attrs
     ):
         # Query information
@@ -51,6 +52,7 @@ class SearchNode:
         self.parent = parent
         self.depth = parent.depth + 1 if parent else 0
         self.extra = attrs.get("extra", {})  # Additional attributes
+        self.reranker = None  # wsl-72
 
     def convert_to_dict(self) -> dict:
         """Convert node to dictionary format for serialization"""
@@ -67,6 +69,7 @@ class SearchNode:
             "depth": self.depth,
             "search_status": self.status,
             "source": self.source,
+            "reranked_top_docs": self.reranked_top_docs,  # wsl<--- 新增
             "extra": self.extra,
         }
 
@@ -94,7 +97,50 @@ class SearchNode:
         """Add a child node"""
         child.parent = self
         child.depth = self.depth + 1
+        # wsl 如果子节点没有自己的 reranker，继承父节点的
+        if child.reranker is None and self.reranker is not None:
+            child.reranker = self.reranker
         self.children.append(child)
+
+    def apply_reranking(self, user_query: str, score_name: str = "sim_score") -> None: #wsl-启用重排序
+        """
+        使用注入的 Reranker 对当前节点的 docs 进行重排序。
+        结果将存储在 self.reranked_top_docs 中。
+        """
+        if not self.reranker:
+            logger.warning("No reranker instance provided. Skipping reranking.")
+            return
+
+        if not self.docs:
+            logger.info("No documents to rerank in this node.")
+            return
+
+        logger.info(f"Applying reranking for query: {user_query}")
+        # 调用重排序器（注意：rerank.py 返回的是排序后的列表）
+        reranked = self.reranker.rerank_query_and_doc_list(
+            all_docs=self.docs,
+            user_query=user_query,
+            score_name=score_name
+        )
+
+        # 如果重排序成功返回了结果（非空），则存储；否则保留原有排序
+        if reranked:
+            self.reranked_top_docs = reranked
+            logger.info(f"Reranking complete. Top {len(reranked)} docs stored.")
+        else:
+            logger.warning("Reranking returned empty results, keeping original order.")
+
+    def get_best_docs(self) -> List[Dict]: #wsl
+        """
+        获取当前节点最优的文档列表。
+        优先返回重排序后的结果；若无，则返回按 sim_score 降序排序的原始结果。
+        """
+        if self.reranked_top_docs:
+            return self.reranked_top_docs
+        else:
+            # 这里可以复用 sort_doc 的逻辑，但 sort_doc 会修改 self.docs 本身。
+            # 为了不改变原始顺序，这里返回一个排序后的副本。
+            return sorted(self.docs, key=lambda x: x.get("sim_score", 0), reverse=True)
 
     @property
     def has_results(self) -> bool:
