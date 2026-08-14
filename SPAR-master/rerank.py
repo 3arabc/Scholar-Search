@@ -17,14 +17,15 @@ from log import logger #wsl-71
 
 class Reranker(object):
 
-    def rerank_query_and_doc_list(self, all_docs, user_query, score_name="sim_score", sort_by='year'):
+    def rerank_query_and_doc_list(self, all_docs, user_query, score_name="sim_score", sort_by='year', domain=None):
         """
         根据 sort_by 参数对文档进行排序：
             'year'      : 按出版年份降序（最新优先），无效年份排在最后
             'citations' : 按引用数降序（最多优先），无效引用排在最后
-            'similarity': 按相似度降序（最高优先），无效相似度排在最后（但相似度通常都存在）
+            'similarity': 按相似度降序（最高优先）
+        若提供 domain，则对匹配领域的文档给予额外加分（+0.1），提升排序。
         """
-        logger.info(f"Reranking documents by {sort_by} (descending), invalid values at the end...")
+        logger.info(f"Reranking documents by {sort_by} (descending), invalid values at the end, domain={domain}...")
         self.user_query = user_query
         self.score_name = score_name
 
@@ -35,19 +36,18 @@ class Reranker(object):
             logger.warning("No documents to rerank")
             return []
 
+        # 定义排序 key 函数，返回 (valid, sort_val, domain_bonus)
+        # 为了简单，我们将 domain_bonus 加到 sort_val 上（但须确保 sort_val 是数值）
         def sort_key(doc):
+            # 计算基础排序值
             if sort_by == 'year':
                 year = doc.get("publicationYear") or doc.get("year")
                 try:
                     year_val = int(year) if year is not None else None
                 except (ValueError, TypeError):
                     year_val = None
-                # 有效标志：1有效，0无效
                 valid = 1 if year_val is not None else 0
-                # 排序值：有效时取负值（降序），无效时取 0
                 sort_val = -year_val if year_val is not None else 0
-                return (valid, sort_val)
-
             elif sort_by == 'citations':
                 citations = doc.get("citationCount") or doc.get("citations")
                 try:
@@ -56,22 +56,38 @@ class Reranker(object):
                     cit_val = None
                 valid = 1 if cit_val is not None else 0
                 sort_val = -cit_val if cit_val is not None else 0
-                return (valid, sort_val)
-
             else:  # 'similarity'
                 sim = doc.get(score_name, 0.0)
-                # 相似度通常总是存在，但为了统一，也做有效性检查
                 try:
                     sim_val = float(sim) if sim is not None else None
                 except (ValueError, TypeError):
                     sim_val = None
                 valid = 1 if sim_val is not None else 0
                 sort_val = -sim_val if sim_val is not None else 0
-                return (valid, sort_val)
+
+            # 领域匹配加分
+            domain_bonus = 0.0
+            if domain and domain != "undefined":
+                fields = doc.get("fieldsOfStudy", [])
+                # 如果 fields 是字符串，转为列表
+                if isinstance(fields, str):
+                    fields = [f.strip() for f in fields.split(';') if f.strip()]
+                # 检查是否包含 domain 关键词（忽略大小写）
+                matched = False
+                for field in fields:
+                    if domain.lower() in field.lower():
+                        matched = True
+                        break
+                if matched:
+                    domain_bonus = -0.1  # 因为我们要降序，所以加负值（相当于加分）
+                    # 注意：我们已定义 sort_val 为负值（降序），所以 domain_bonus 也应为负值才能提升排序
+
+            # 返回 (valid, sort_val + domain_bonus)
+            return (valid, sort_val + domain_bonus)
 
         sorted_docs = sorted(all_docs, key=sort_key)
 
-        # 为每个文档添加 rerank_score（与排序键对应，方便下游使用）
+        # 为每个文档添加 rerank_score
         for doc in sorted_docs:
             if sort_by == 'year':
                 year = doc.get("publicationYear") or doc.get("year")
@@ -85,66 +101,50 @@ class Reranker(object):
                     doc['rerank_score'] = int(citations) if citations is not None else 0
                 except:
                     doc['rerank_score'] = 0
-            else:  # 'similarity'
+            else:
                 doc['rerank_score'] = doc.get(score_name, 0.0)
 
         logger.info(f"Reranking completed. Top document: {sorted_docs[0].get('title', '') if sorted_docs else 'None'}")
         return sorted_docs
-
     '''
-    def rerank_query_and_doc_list(self,all_docs,user_query,score_name="sim_score"):
-        """
-        使用 LLM 对 top-K 文档进行重排序。
-        重排依据：年份（最新优先）> 引用数（多优先）> 相似度（高优先）。
-        """
-        logger.info("Reranking documents using LLM with priority: Year > Citations > Similarity")
-        self.user_query = user_query
-        self.score_name = score_name
-
+    def rerank_query_and_doc_list(self, all_docs, user_query, score_name="sim_score", sort_by='year'):
+        # 原有的提取时间约束等可以保留，但排序逻辑改为加权综合评分
         if isinstance(all_docs, dict):
             all_docs = list(all_docs.values())
-
         if not all_docs:
-            logger.warning("No documents to rerank")
             return []
 
-        # 1. 按原始分数排序，取前 K 篇（K=50，可配置）
-        TOP_K = 20
-        sorted_by_sim = sorted(all_docs, key=lambda x: x.get(score_name, 0), reverse=True)
-        top_docs = sorted_by_sim[:TOP_K]
+        # 提取各项指标并归一化
+        sim_values = [doc.get(score_name, 0) for doc in all_docs]
+        citation_values = [doc.get("citationCount", 0) for doc in all_docs]
+        year_values = [doc.get("publicationYear", doc.get("year", 0)) for doc in all_docs]
 
-        if not top_docs:
-            logger.warning("No top documents to rerank")
-            return []
+        # 归一化（Min-Max）
+        def normalize(vals):
+            min_v, max_v = min(vals), max(vals)
+            if max_v == min_v:
+                return [0.5] * len(vals)
+            return [(v - min_v) / (max_v - min_v) for v in vals]
 
-        # 2. 提取时间约束
-        time_constraints = self._extract_time_constraints(user_query)
+        norm_sim = normalize(sim_values)
+        norm_citation = normalize(citation_values)
+        norm_year = normalize([int(y) if y else 0 for y in year_values])
 
-        # 3. 准备提示词（已修改，明确优先级）
-        prompt = self._prepare_reranking_prompt(top_docs, time_constraints)
+        # 权重（可调）
+        w_sim = 0.5  # 相似度最重要
+        w_citation = 0.3
+        w_year = 0.2
 
-        logger.info(f"LLM Reranking prompt length: {len(prompt)} characters")
+        # 计算综合评分
+        for i, doc in enumerate(all_docs):
+            score = w_sim * norm_sim[i] + w_citation * norm_citation[i] + w_year * norm_year[i]
+            doc['rerank_score'] = score
 
-        logger.debug(f"prompt: {prompt}")
-        try:
-            # 4. 调用 LLM 获取重排结果
-            reranked_results = self.llm_rerank_documents(prompt)
-
-            # 5. 更新文档分数
-            top_docs = self._update_documents_with_reranking(reranked_results, top_docs)
-
-            # 6. 按新的 rerank_score 排序（降序）
-            top_docs.sort(key=lambda x: x.get('rerank_score', 0), reverse=True)
-
-            logger.info("LLM reranking completed successfully")
-        except Exception as e:
-            logger.error(f"LLM reranking failed: {traceback.format_exc()}")
-            # 失败时回退到原始排序（按相似度）
-            return top_docs
-
-        return top_docs
+        # 按综合评分降序排序
+        sorted_docs = sorted(all_docs, key=lambda d: d.get('rerank_score', 0), reverse=True)
+        logger.info(f"Reranking completed by composite score.")
+        return sorted_docs
     '''
-
     def _extract_time_constraints(self, query):
         """
         Extract time constraints from the query string.

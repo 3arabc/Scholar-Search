@@ -12,13 +12,15 @@ from typing import Dict, List, Any
 # Debug mode
 DEBUG = False
 
-#set SILICONFLOW_API_KEY=sk-uejssktdixvxpaorxeonyztxomulwlnxkqmnisonsiffepsn
+#set DEEPSEEK_API_KEY=sk-c049a5216e1244409378514aa687f95d
+#set SILICONFLOW_API_KEY=sk-pjizzeaxvfoqofwrvedkytrrearnoyifexctvmeyhkqxzuih
 #set GOOGLE_SERPER_KEY=28cca99adde1d0a52ecd6b3b481b37f093d499e3
 #set OPENALEX_API_KEY=HVx0tDeogC37dQ10aIPTm5
 #python demo_app_with_front.py
 # =============================================================================
 # OPENAI CONFIGURATION
 # =============================================================================
+'''
 API_KEY = os.getenv(
     "SILICONFLOW_API_KEY",
     "sk-uejssktdixvxpaorxeonyztxomulwlnxkqmnisonsiffepsn",
@@ -27,15 +29,21 @@ ENDPOINT = os.getenv(
     "SILICONFLOW_BASE_URL",
     "https://api.siliconflow.cn/v1/chat/completions",
 )
-DEPLOYMENT_NAME = "deepseek-ai/DeepSeek-V3.2"
+'''
+API_KEY = os.getenv(
+    "DEEPSEEK_API_KEY",
+    "sk-c049a5216e1244409378514aa687f95d",
+)
+ENDPOINT = os.getenv(
+    "DEEPSEEK_BASE_URL",
+    "https://api.deepseek.com/v1",
+)
+#DEPLOYMENT_NAME = "deepseek-ai/DeepSeek-V3.2"
 
 # =============================================================================
 # PIPELINE CONFIGURATION
 # =============================================================================
 
-# 二次筛选（已关闭：与第一阶段评分重复，且串行评分耗时巨大）
-ENABLE_LLM_RERANK = False        # 关闭 LLM 二次过滤
-LLM_RERANK_THRESHOLD = 0.7      # 保留分数阈值
 
 SAVE_ID2DOCS = True
 RELEVANCE_SCORE = 0.5
@@ -57,7 +65,9 @@ LENGTH_GEN_QUERY_FROM_CITATION = 12288
 TRY_COUNT = 4
 LLM_TRY_COUNT = 2  #wsl-74重试次数
 LLM_PARALLEL_NUM = 4
-LLM_MODEL_NAME = "deepseek-ai/DeepSeek-V3.2"
+#LLM_MODEL_NAME = "deepseek-ai/DeepSeek-V3.2"
+#LLM_MODEL_NAME = "Qwen3-8B"
+LLM_MODEL_NAME = "deepseek-chat"
 
 
 API_TRY_COUNT = 4
@@ -86,8 +96,8 @@ DO_REFERENCE_SEARCH = True  # 启用引用搜索，从相关论文的参考文�
 
 # Similarity thresholds（已恢复原版0.5，减少低质量文档进入后续环节）
 REFERENCE_DOC_SIM_THRESHOLD = 0.5
-BEGIN_SIM_THRESHOLD = 0.5
-PASS_SIM_THRESHOLD = 0.5
+BEGIN_SIM_THRESHOLD = 0.6
+PASS_SIM_THRESHOLD = 0.6
 REFERENCE_EXPAND_THRESHOLD = 0.7  # 引用扩展门槛：仅 sim_score ≥ 此值的论文才取其参考文献
 
 # Search routes configuration
@@ -112,17 +122,14 @@ RERANK = True #wsl-73
 KEY_WORDS_NUM =2
 LLM_PARREL_NUM=4  #wsl-74并发
 #wsl-710
-SIM_THRESHOLD = 0.3
-MAX_DOCS = 200               # 原来可能10，增大到200
+SIM_THRESHOLD = 0.6
+MAX_DOCS = 100               # 原来可能10，增大到200
 # 重排序条件
 RERANK_SORT_BY = 'year'   # 默认按年份排序
 # 过滤配置
-FILTER_YEAR_START = 2020
+FILTER_YEAR_START = 2015
 FILTER_YEAR_END = 2025
 FILTER_MIN_CITATIONS = 10
-FILTER_FIELDS = ["Computer Science"]  # 支持多个
-# 是否启用领域过滤（如果 FILTER_FIELDS 为空，即使启用也无效）
-FILTER_ENABLE_FIELDS = True
 
 # 是否启用年份过滤
 FILTER_ENABLE_YEAR = True
@@ -160,7 +167,8 @@ ARXIV_CLIENT = arxiv.Client(delay_seconds=0.05)
 # RERANKING CONFIGURATION
 # =============================================================================
 ENABLE_RERANK = False
-RERANK_MODEL = "deepseek-ai/DeepSeek-V3.2"  # 与主模型一致
+#RERANK_MODEL = "deepseek-ai/DeepSeek-V3.2"  # 与主模型一致
+RERANK_MODEL ="deepseek-chat"
 
 # =============================================================================
 # CONFIGURATION VALIDATION

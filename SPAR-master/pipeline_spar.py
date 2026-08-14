@@ -53,7 +53,6 @@ class AcademicSearchTree:
         max_docs: int = 200,
         similarity_threshold: float = 0.6,
         search_engine=None,
-        enable_llm_rerank=True,  # wsl-73 二次筛选
         llm_threshold=0.7,
         filter_config=None
     ):
@@ -69,7 +68,6 @@ class AcademicSearchTree:
         self.high_score_thresh = 0.75
         self.search_engine = AcademicTreeSearchEngine()
         self.reranker = Reranker()
-        self.enable_llm_rerank = enable_llm_rerank  # wsl-73 二次筛选
         self.llm_threshold = llm_threshold
         self.filter_config = filter_config or {}
 
@@ -108,7 +106,7 @@ class AcademicSearchTree:
             return {}
 
         if filter_config is None:
-            from global_config import (
+            from .global_config import (
                 FILTER_YEAR_START, FILTER_YEAR_END,
                 FILTER_MIN_CITATIONS, FILTER_FIELDS,
                 FILTER_ENABLE_YEAR, FILTER_ENABLE_CITATIONS, FILTER_ENABLE_FIELDS,
@@ -310,6 +308,61 @@ class AcademicSearchTree:
             logger.error(f"Query fusion failed: {traceback.format_exc()}")
             # Fallback to just the original query if expansion fails
             return [self.root.query_str], {}
+    #wsl-8.11意图查询
+    def _enhance_queries_by_intent(self, queries: List[str], intent: str) -> List[str]:
+        """
+        根据意图向查询添加修饰词，生成增强查询
+        """
+        if not intent or not queries:
+            return queries
+
+        intent_lower = intent.lower()
+        # 定义意图到修饰词的映射（可扩展）
+        intent_bonus = {
+            "survey": ["survey", "review", "overview"],
+            "review": ["survey", "review", "systematic"],
+            "literature": ["survey", "review", "literature"],
+            "method": ["method", "approach", "technique", "comparative"],
+            "comparison": ["comparative", "comparison", "benchmark"],
+            "application": ["application", "implementation", "case study"],
+            "recent": ["recent", "latest", "state-of-the-art"]
+        }
+
+        # 匹配意图关键词
+        bonus_terms = []
+        for key, terms in intent_bonus.items():
+            if key in intent_lower:
+                bonus_terms.extend(terms)
+                break  # 只取第一个匹配的意图类别
+
+        if not bonus_terms:
+            return queries
+
+        # 生成增强查询：只对较长的自然语言查询（>3个词）添加修饰词
+        enhanced = []
+        for q in queries:
+            # 如果查询是短语查询（带引号）或太短（≤3词），保持原样，避免破坏精确性
+            if q.startswith('"') or len(q.split()) <= 3:
+                enhanced.append(q)
+            else:
+                # 添加1-2个修饰词（避免过多）
+                added = False
+                for term in bonus_terms[:2]:
+                    if term not in q.lower():
+                        enhanced.append(f"{q} {term}")
+                        added = True
+                        break  # 只添加一个修饰词，避免过度膨胀
+                if not added:
+                    enhanced.append(q)  # 若已包含则不加
+
+        # 合并原始查询和增强查询（去重），顺序保持原始在前
+        result = queries.copy()
+        for e in enhanced:
+            if e not in result:
+                result.append(e)
+
+        logger.info(f"Intent enhancement: added {len(result) - len(queries)} queries based on intent '{intent}'")
+        return result
 
     def query_level_search(
         self,
@@ -376,6 +429,41 @@ class AcademicSearchTree:
         logger.info(f"Using sources: {sources}")
 
         try:
+            '''
+            # ===== 新增：根据意图增强查询（只针对原始用户查询） =====
+            intent = None
+            if hasattr(self.root, "extra") and "expanded_queries_info" in self.root.extra:
+                intent = self.root.extra["expanded_queries_info"].get("query_intent", "")
+            if intent:
+                original_query = self.root.query_str  # 原始自然语言查询
+                # 只对自然语言查询增强（不短于3个词，且不是精确短语）
+                if len(original_query.split()) > 3 and not original_query.startswith('"'):
+                    intent_lower = intent.lower()
+                    bonus_terms = []
+                    # 意图到修饰词的映射（简化）
+                    intent_bonus = {
+                        "survey": ["survey", "review", "overview"],
+                        "review": ["survey", "review", "systematic"],
+                        "literature": ["survey", "review", "literature"],
+                        "method": ["method", "approach", "technique", "comparative"],
+                        "comparison": ["comparative", "comparison", "benchmark"],
+                        "application": ["application", "implementation", "case study"],
+                        "recent": ["recent", "latest", "state-of-the-art"]
+                    }
+                    for key, terms in intent_bonus.items():
+                        if key in intent_lower:
+                            bonus_terms.extend(terms)
+                            break
+                    if bonus_terms:
+                        # 只取第一个修饰词
+                        term = bonus_terms[0]
+                        if term not in original_query.lower():
+                            enhanced_query = f"{original_query} {term}"
+                            # 避免重复
+                            if enhanced_query not in expanded_queries:
+                                expanded_queries.append(enhanced_query)
+                                logger.info(f"Intent enhancement added: '{enhanced_query}'")
+            '''
             # Execute batch search across multiple sources
             batch_result, id2docs, query_source_map, query_keywords2raw = (
                 self.search_engine.search_papers_mroute(
@@ -873,6 +961,12 @@ class AcademicSearchTree:
             # Start with query fusion to generate initial queries
             # Instead of a list of nodes, now query_fusion returns a list of query strings
             expanded_queries, query_node_relations = self.query_fusion()
+            # 获取查询领域（用于领域感知排序）
+            query_domain = "undefined"
+            if hasattr(self.root, "extra") and "expanded_queries_info" in self.root.extra:
+                query_domain = self.root.extra["expanded_queries_info"].get("domain", "undefined")
+            logger.info(f"Query domain for reranking: {query_domain}")
+
             search_queue = deque([expanded_queries])
 
             # Track search progress
@@ -961,34 +1055,6 @@ class AcademicSearchTree:
                 f"Found {high_rel_count} highly relevant documents (score > {self.high_score_thresh})"
             )
 
-            # wsl-73二次筛选
-            if ENABLE_LLM_RERANK:
-                logger.info("Applying LLM fine-grained filtering on reranked top docs...")
-                # 获取重排序后的文档（如果存在）
-                reranked_docs = self.root.reranked_top_docs if self.root.reranked_top_docs else list(
-                    self.root.searched_docs.values())
-                # 只对前 TOP_FOR_LLM_FILTER 篇打分
-                TOP_FOR_LLM_FILTER = 50  # 可调
-                docs_to_filter = reranked_docs[:TOP_FOR_LLM_FILTER]
-                filtered_docs = {}
-                for doc in docs_to_filter:
-                    doc_id = doc.get("paper_id", "")
-                    if not doc_id:
-                        continue
-                    llm_score = llm_relevance_score(self.user_query, doc)
-                    doc['llm_score'] = llm_score
-                    # 降低阈值，避免误杀
-                    if llm_score >= 0.3:  # 调低阈值，宁可多留一些
-                        filtered_docs[doc_id] = doc
-                    else:
-                        logger.debug(f"Filtered doc {doc_id} with LLM score {llm_score:.2f}")
-                # 将未过滤的文档（超出TOP_FOR_LLM_FILTER的部分）也保留，但分数用原分数
-                for doc in reranked_docs[TOP_FOR_LLM_FILTER:]:
-                    doc_id = doc.get("paper_id", "")
-                    if doc_id and doc_id not in filtered_docs:
-                        filtered_docs[doc_id] = doc
-                self.root.searched_docs = filtered_docs
-                logger.info(f"After LLM filter: {len(filtered_docs)} documents kept")
             # wsl-710 ===== 新增：应用硬性过滤条件 =====
             if self.root.searched_docs:
                 self.root.searched_docs = self._filter_docs(
@@ -998,28 +1064,41 @@ class AcademicSearchTree:
             #if self.root.searched_docs:
             #    self.root.searched_docs = self._filter_docs(self.root.searched_docs)
             #    logger.info(f"After filter: {len(self.root.searched_docs)} documents remain")
-
+            MAX_DOCS = 30
+            SIM_THRESHOLD = 0.6
             if RERANK:
                 logger.info("Applying LLM reranking on all collected docs...")
                 all_docs = list(self.root.searched_docs.values())
                 if all_docs:
                     reranked_list = self.reranker.rerank_query_and_doc_list(
-                        all_docs, self.user_query, score_name="sim_score",sort_by=sort_by
+                        all_docs, self.user_query, score_name="sim_score",sort_by=sort_by, domain=query_domain
                     )
                     if reranked_list:
-                        # 截断到 MAX_DOCS（保持排序顺序）
+                        # 先不截断，保留更多候选（例如前 100 篇）用于 LLM 打分
+                        top_for_llm = 200  # 可配置
+                        reranked_list = reranked_list[:top_for_llm]
+
+                        # ----- 新增：LLM 打分融合 -----
+                        from search_engine import llm_relevance_score
+                        for doc in reranked_list:
+                            llm_score = llm_relevance_score(self.user_query, doc)
+                            doc['llm_score'] = llm_score
+                            # 融合分数：可调整权重，例如 0.5*sim_score + 0.5*llm_score
+                            doc['final_score'] = 0.6 * doc.get('sim_score', 0) + 0.4 * llm_score
+                        # 按 final_score 重新排序
+                        reranked_list.sort(key=lambda x: x.get('final_score', 0), reverse=True)
+                        # 现在截断到 MAX_DOCS
                         reranked_list = reranked_list[:MAX_DOCS]
-                        # 构建有序字典（Python 3.7+ 保留插入顺序）
+                        # 构建 new_searched ...
                         new_searched = {}
                         for doc in reranked_list:
                             doc_id = doc.get("paper_id", "")
                             if doc_id:
-                                # 保留 rerank_score 作为 sim_score 以便下游使用
-                                doc['sim_score'] = doc.get('rerank_score', doc.get('sim_score', 0.0))
+                                doc['sim_score'] = doc.get('final_score', 0)  # 可用最终分数覆盖
                                 new_searched[doc_id] = doc
                         self.root.searched_docs = new_searched
-                        self.root.reranked_top_docs = reranked_list  # 保存排序列表以备后用
-                        logger.info(f"Reranking done. Kept {len(new_searched)} docs.")
+                        self.root.reranked_top_docs = reranked_list
+                        logger.info(f"LLM-enhanced reranking kept {len(reranked_list)} docs.")
                     else:
                         logger.warning("Reranking returned empty, keeping original.")
                         # 如果重排序失败，回退到原有按 sim_score 排序截断
@@ -1053,7 +1132,38 @@ class AcademicSearchTree:
                             kept += 1
                     self.root.searched_docs = filtered
                     logger.info(f"Final filter: kept {kept} docs (threshold={SIM_THRESHOLD}, max={MAX_DOCS})")
+            # ===== 最终严格验证：只保留直接相关的论文 =====
+            if self.root.reranked_top_docs:
+                TOP_K = 20  # 只验证前 30 篇（可调）
+                docs_to_validate = self.root.reranked_top_docs[:TOP_K]
+                validated_docs = []
+                for doc in docs_to_validate:
+                    is_rel, conf = llm_is_relevant_strict(self.user_query, doc)
+                    doc['llm_strict_relevant'] = is_rel
+                    doc['llm_strict_confidence'] = conf
+                    if is_rel and conf >= 0.7:  # 置信度阈值
+                        validated_docs.append(doc)
+                    else:
+                        logger.debug(
+                            f"Strict validation removed: {doc.get('title', '')[:50]}... (conf={conf:.2f})")
 
+                if validated_docs:
+                    # 用验证通过的文档替换原有列表（保留顺序）
+                    self.root.reranked_top_docs = validated_docs
+                    # 重建 searched_docs
+                    new_searched = {}
+                    for doc in validated_docs:
+                        doc_id = doc.get("paper_id", "")
+                        if doc_id:
+                            new_searched[doc_id] = doc
+                    self.root.searched_docs = new_searched
+                    logger.info(f"Strict validation kept {len(validated_docs)}/{len(docs_to_validate)} docs.")
+                else:
+                    # 如果全部被剔除，回退到未验证的列表（可选）
+                    logger.warning("All docs rejected by strict validation, keeping original list.")
+                    # 保留原始列表（不做剔除），或者降低阈值重新验证
+                    # 这里保留原始列表，但可以根据需求改为空列表或降低阈值
+                    pass
             # 最后返回结果（需修改 _collect_results 避免打乱顺序）
             return self._collect_results()
 
@@ -1065,6 +1175,60 @@ class AcademicSearchTree:
             # Always clean up resources
             self._cleanup_resources()
 
+    def _dedup_papers(self, papers_dict: dict) -> dict:
+        """
+        按标题去重，保留第一篇出现的文档。
+        无标题的文档全部保留。
+        """
+        import re
+        seen = {}
+        result = {}
+        for doc_id, doc in papers_dict.items():
+            title = doc.get('title', '').strip()
+            if not title:
+                # 无标题直接保留
+                result[doc_id] = doc
+                continue
+            # 归一化标题：小写，去除标点，压缩空格
+            norm_title = re.sub(r'[^\w\s]', '', title)
+            norm_title = re.sub(r'\s+', ' ', norm_title).strip().lower()
+            if not norm_title:
+                # 归一化后为空（极端情况），也保留
+                result[doc_id] = doc
+                continue
+            if norm_title not in seen:
+                seen[norm_title] = doc_id
+                result[doc_id] = doc
+            else:
+                logger.debug(f"Dedup: removed duplicate title '{title[:50]}...'")
+        logger.info(f"After dedup: {len(result)} papers (from {len(papers_dict)})")
+        return result
+
+    def _collect_results(self) -> Dict:
+        """Collect search results with diversity optimization, but respect reranked order if available."""
+        # 如果重排序结果存在，直接返回（保持顺序）
+        if hasattr(self.root, 'reranked_top_docs') and self.root.reranked_top_docs:
+            all_papers = {}
+            for doc in self.root.reranked_top_docs:
+                doc_id = doc.get("paper_id", "")
+                if doc_id:
+                    all_papers[doc_id] = doc
+            # 去重后返回
+            return self._dedup_papers(all_papers)
+        # 否则执行原有逻辑（多样性选择）
+        all_docs = self.root.searched_docs
+        if not all_docs:
+            return {}
+        # 按 sim_score 排序，取前 max_docs
+        sorted_docs = sorted(
+            all_docs.items(),
+            key=lambda x: x[1].get("sim_score", 0),
+            reverse=True,
+        )
+        selected = dict(sorted_docs[:self.max_docs])
+        # 去重后返回
+        return self._dedup_papers(selected)
+    '''
     def _collect_results(self) -> Dict:
         """Collect search results with diversity optimization, but respect reranked order if available."""
         # 如果重排序结果存在，直接返回（保持顺序）
@@ -1086,7 +1250,7 @@ class AcademicSearchTree:
             reverse=True,
         )
         return dict(sorted_docs[:self.max_docs])
-
+    '''
     def _select_diverse_queries(self, candidates, k):
         """
         基于 Jaccard 多样性的贪心查询选择。
