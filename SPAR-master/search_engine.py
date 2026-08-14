@@ -59,7 +59,7 @@ def get_info_from_local(id_list):
 class MultiSearchAgent:
     """Agent for parallel multi-source academic paper search and result aggregation."""
 
-    def __init__(self, max_workers: int = 3, batch_size: int = 10):
+    def __init__(self, max_workers: int = 8, batch_size: int = 10):  # 提速优化：3→8
         """
         Initialize the multi-search agent.
         Args:
@@ -1704,7 +1704,7 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
             for doc in docs
         ]
         score_info_list = self.emd_model.get_score(
-            query, golden_paper_info, batch_size=6
+            query, golden_paper_info, batch_size=32
         )
         for doc, sim_score in zip(docs, score_info_list):
             # 如果都没有，设为空列表
@@ -1794,7 +1794,7 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
             for doc in docs
         ]
         score_info_list = self.emd_model.get_score(
-            query, golden_paper_info, batch_size=12
+            query, golden_paper_info, batch_size=32
         )
 
         assert len(score_info_list) == len(golden_paper_info)
@@ -1863,7 +1863,7 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
             golden_paper_info.append(enhanced_text)
 
         # ----- 计算 BGE 相似度 -----
-        score_info_list = self.emd_model.get_score(query, golden_paper_info, batch_size=12)
+        score_info_list = self.emd_model.get_score(query, golden_paper_info, batch_size=32)
         assert len(score_info_list) == len(docs)
 
         # ----- 合并分数并添加标题匹配加分（加大权重）-----

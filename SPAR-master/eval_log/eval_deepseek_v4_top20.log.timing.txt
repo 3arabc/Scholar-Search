@@ -1,0 +1,21 @@
+Q1: 总耗时   13.9 min | LLM请求  35 次 LLM等待   0.2 min | API请求   0 次
+Q2: 总耗时   14.8 min | LLM请求  35 次 LLM等待   0.1 min | API请求   0 次
+Q3: 总耗时    8.9 min | LLM请求  34 次 LLM等待   0.1 min | API请求   0 次
+Q4: 总耗时    8.5 min | LLM请求  19 次 LLM等待   0.0 min | API请求   0 次
+Q5: 总耗时   12.1 min | LLM请求  35 次 LLM等待   0.1 min | API请求   0 次
+Q6: 总耗时   10.5 min | LLM请求  35 次 LLM等待   0.1 min | API请求   0 次
+Q7: 总耗时   11.2 min | LLM请求  23 次 LLM等待   0.1 min | API请求   0 次
+Q8: 总耗时   14.9 min | LLM请求  35 次 LLM等待   0.1 min | API请求   0 次
+Q9: 总耗时    5.3 min | LLM请求  21 次 LLM等待   0.1 min | API请求   0 次
+Q10: 总耗时    7.7 min | LLM请求  35 次 LLM等待   0.1 min | API请求   0 次
+Q11: 总耗时    6.6 min | LLM请求  28 次 LLM等待   0.0 min | API请求   0 次
+Q12: 总耗时    9.1 min | LLM请求  35 次 LLM等待   0.1 min | API请求   0 次
+Q13: 总耗时   10.2 min | LLM请求  35 次 LLM等待   0.1 min | API请求   0 次
+Q14: 总耗时    7.2 min | LLM请求  35 次 LLM等待   0.1 min | API请求   0 次
+Q15: 总耗时   10.1 min | LLM请求  34 次 LLM等待   0.1 min | API请求   0 次
+Q16: 总耗时   12.9 min | LLM请求  35 次 LLM等待   0.0 min | API请求   0 次
+Q17: 总耗时    9.9 min | LLM请求  35 次 LLM等待   0.1 min | API请求   0 次
+Q18: 总耗时    9.3 min | LLM请求  35 次 LLM等待   0.1 min | API请求   0 次
+Q19: 总耗时    7.9 min | LLM请求  29 次 LLM等待   0.1 min | API请求   0 次
+Q20: 总耗时    9.8 min | LLM请求  35 次 LLM等待   0.1 min | API请求   0 次
+合计: LLM请求 643 次, API请求 0 次
