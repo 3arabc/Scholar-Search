@@ -1956,17 +1956,132 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
         return relevace_docs, irrelevace_docs
         '''
 
+    def _get_refs_from_openalex(self, doc_info, max_refs=REFERENCE_DOC_PRUNED):
+        """
+        通过 openalex API 获取论文的参考文献（无需 API key）。
+        与 api_web 中的旧实现不同：
+          - 不依赖失效的 Semantic Scholar API
+          - 不过滤 is_oa（保留非开放获取的引用）
+          - 引用条目带 paper_id 字段（供 add_signature_for_doc 使用）
+          - 并行拉取引用详情，并按 REFERENCE_DOC_PRUNED 裁剪数量
+        """
+        import requests
+
+        try:
+            work_id = None
+            # 1) 已有 openalex 链接（W 开头 ID）
+            oa_url = doc_info.get("openalex_url", "") or doc_info.get(
+                "referenceWorksOpenAlex", ""
+            )
+            if isinstance(oa_url, list) and oa_url:
+                oa_url = oa_url[0] if not isinstance(oa_url[0], dict) else oa_url[0].get("id", "")
+            if isinstance(oa_url, str) and oa_url and re.search(r"/W\d+", oa_url):
+                work_id = re.search(r"(https://api\.openalex\.org/)?(W\d+)", oa_url).group(2)
+            # 2) 通过标题在 openalex 查找 work（ids.arxiv filter 已被 openalex 弃用，改用 title.search）
+            if not work_id and doc_info.get("title"):
+                title = str(doc_info.get("title", ""))[:200]
+                params = {"search": title, "per-page": "5"}
+                if OPENALEX_API_KEY:
+                    params["api_key"] = OPENALEX_API_KEY
+                r = requests.get(
+                    "https://api.openalex.org/works", params=params, timeout=15
+                )
+                if r.status_code == 200:
+                    results = r.json().get("results", [])
+                    if results:
+                        # 取标题最接近的 work
+                        from difflib import SequenceMatcher
+
+                        def _sim(a, b):
+                            return SequenceMatcher(
+                                None,
+                                re.sub(r"[^\w\s]", "", a.lower()),
+                                re.sub(r"[^\w\s]", "", b.lower()),
+                            ).ratio()
+
+                        best = max(
+                            results, key=lambda w: _sim(w.get("title", ""), title)
+                        )
+                        if _sim(best.get("title", ""), title) >= 0.5:
+                            work_id = best.get("id", "").rstrip("/").split("/")[-1]
+            if not work_id:
+                logger.info(f"[openalex] No work found for {doc_info.get('arxivId', doc_info.get('title', ''))[:40]}")
+                return doc_info
+
+            # 3) 获取 referenced_works 列表
+            params = {"per-page": "200"}
+            if OPENALEX_API_KEY:
+                params["api_key"] = OPENALEX_API_KEY
+            r = requests.get(f"https://api.openalex.org/works/{work_id}", params=params, timeout=15)
+            if r.status_code != 200:
+                logger.warning(f"[openalex] Failed to get work {work_id}: {r.status_code}")
+                return doc_info
+            ref_ids = r.json().get("referenced_works", []) or []
+            if not ref_ids:
+                logger.info(f"[openalex] No references for work {work_id}")
+                return doc_info
+            ref_ids = ref_ids[:max_refs] if max_refs else ref_ids
+
+            # 4) 并行拉取每篇引用详情
+            def _fetch_ref(ref_id):
+                try:
+                    rr = requests.get(
+                        f"https://api.openalex.org/works/{ref_id}", params=params, timeout=10
+                    )
+                    if rr.status_code != 200:
+                        return None
+                    rd = rr.json()
+                    title = rd.get("title", "") or ""
+                    inv = rd.get("abstract_inverted_index")
+                    abstract = " ".join(inv.keys()) if inv else ""
+                    if not title or not abstract:
+                        return None
+                    ids = rd.get("ids", {}) or {}
+                    arxiv_id = ids.get("arxiv") or ""
+                    paper_id = (
+                        arxiv_id.split("/")[-1]
+                        if arxiv_id
+                        else ref_id.rstrip("/").split("/")[-1]
+                    )
+                    return {
+                        "paper_id": paper_id,
+                        "arxivId": arxiv_id.split("/")[-1] if arxiv_id else "",
+                        "title": title,
+                        "abstract": abstract,
+                        "publicationYear": rd.get("publication_year"),
+                        "citationCount": rd.get("cited_by_count", 0),
+                        "fieldsOfStudy": rd.get("primary_topic", {}).get("field", {}).get("display_name", ""),
+                        "openalex_url": rd.get("id", ""),
+                        "referenceWorksOpenAlex": rd.get("referenced_works", []) or [],
+                    }
+                except Exception:
+                    return None
+
+            refs = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+                for future in concurrent.futures.as_completed(
+                    [executor.submit(_fetch_ref, rid) for rid in ref_ids]
+                ):
+                    ref = future.result()
+                    if ref is not None:
+                        refs.append(ref)
+            logger.info(
+                f"[openalex] Got {len(refs)} references for work {work_id} (from {len(ref_ids)} ids)"
+            )
+            doc_info["references"] = refs
+            return doc_info
+        except Exception as e:
+            logger.error(
+                f"Failed to get references via openalex for {doc_info.get('arxivId', doc_info.get('title', ''))[:40]}: {e}"
+            )
+            return doc_info
+
     def get_doc_references(self, doc_info):
         try:
-            if "arxivId" in doc_info:
-                if not doc_info.get("arxivId", ""):
-                    return doc_info
-                doc_info_new = get_doc_info_from_semantic_scholar_by_arxivid(
-                    doc_info["arxivId"]
-                )
-                if doc_info_new is not None:
-                    doc_info.update(doc_info_new)
-                    return doc_info
+            if "arxivId" in doc_info or "paper_id" in doc_info:
+                # 统一走 openalex（Semantic Scholar API key 已失效，弃用）
+                doc_info = self._get_refs_from_openalex(doc_info)
+                return doc_info
 
             elif "PMID" in doc_info:  #wsl
                 # current doc has references, but the info is simple, get full info
@@ -1977,10 +2092,7 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
                 doc_info["references"] = already_info+pmid_info_lst
 
             elif "referenceWorksOpenAlex" in doc_info:
-                references = search_doc_via_url_from_openalex(
-                    doc_info["referenceWorksOpenAlex"]
-                )
-                doc_info["references"] = references
+                doc_info = self._get_refs_from_openalex(doc_info)
                 return doc_info
 
 

@@ -654,6 +654,9 @@ class AcademicSearchTree:
                         # Get document info from search state
                         doc_info = self.root.searched_docs.get(doc["paper_id"])
                         if not doc_info:
+                            # 回退到 cal_sim_docs（打分缓存，含全部候选文档）
+                            doc_info = self.root.cal_sim_docs.get(doc["paper_id"])
+                        if not doc_info:
                             logger.warning(
                                 f"Document info not found for {doc['paper_id']}"
                             )
@@ -685,6 +688,9 @@ class AcademicSearchTree:
                             for ref in refs
                             if ref.get("title") and ref.get("abstract")
                         ]
+                        # 裁剪每篇论文的引用数量（REFERENCE_DOC_PRUNED）
+                        if len(valid_refs) > REFERENCE_DOC_PRUNED:
+                            valid_refs = valid_refs[:REFERENCE_DOC_PRUNED]
 
                         ref_count += len(valid_refs)
                         doc_info["references"] = valid_refs
@@ -840,7 +846,7 @@ class AcademicSearchTree:
 
         return level_node, search_queue, query_node_relations
 
-    def search(self, initial_query: str, end_date="", filter_params: dict = None, sort_by: str = 'year', selected_queries: list = None, expanded_queries: list = None, selected_keywords: list = None) -> List:
+    def search(self, initial_query: str, end_date="", filter_params: dict = None, sort_by: str = 'similarity', selected_queries: list = None, expanded_queries: list = None, selected_keywords: list = None) -> List:
         """
         Main search method that:
         1. Initializes search tree with root query
