@@ -575,9 +575,12 @@ def search_paper_via_query_from_openalex(
         }
         for i in range(4):
             headers = {}
-            if OPENALEX_API_KEY:
+            use_key = OPENALEX_API_KEY and i < 2  # key 可能失效：前两次带 key，429 后降级匿名
+            if use_key:
                 headers["Authorization"] = f"Bearer {OPENALEX_API_KEY}"
-            
+            if i > 0:
+                # 429 限流退避：等待后重试
+                time.sleep(2 * i)
             response = requests.get(
                 base_url, 
                 params=params, 
