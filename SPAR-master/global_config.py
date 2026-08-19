@@ -12,11 +12,7 @@ from typing import Dict, List, Any
 # Debug mode
 DEBUG = False
 
-#set DEEPSEEK_API_KEY=sk-c049a5216e1244409378514aa687f95d
-#set SILICONFLOW_API_KEY=sk-pjizzeaxvfoqofwrvedkytrrearnoyifexctvmeyhkqxzuih
-#set GOOGLE_SERPER_KEY=28cca99adde1d0a52ecd6b3b481b37f093d499e3
-#set OPENALEX_API_KEY=HVx0tDeogC37dQ10aIPTm5
-#python demo_app_with_front.py
+
 # =============================================================================
 # OPENAI CONFIGURATION
 # =============================================================================
@@ -119,13 +115,13 @@ S2_API_KEY = os.getenv("S2_API_KEY", None)
 RERANK =os.getenv("DO_RERANK",True)
 RERANK = True #wsl-73
 
-KEY_WORDS_NUM =2
+KEY_WORDS_NUM =3
 LLM_PARREL_NUM=4  #wsl-74并发
 #wsl-710
 SIM_THRESHOLD = 0.6
 MAX_DOCS = 100               # 原来可能10，增大到200
 # 重排序条件
-RERANK_SORT_BY = 'year'   # 默认按年份排序
+RERANK_SORT_BY = 'similarity'   # 默认按年份排序
 # 过滤配置
 FILTER_YEAR_START = 2015
 FILTER_YEAR_END = 2025
