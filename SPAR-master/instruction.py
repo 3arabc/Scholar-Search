@@ -17,8 +17,8 @@ Question: {user_query}
 Response:
 """
 
-template_extract_keywords_source_aware = """Extract optimal search keywords from the given research question, specifically optimized for '{source}' academic database. Your task is to generate concise, comma-separated query terms that will maximize relevant paper retrieval in this specific platform.
-
+template_extract_keywords_source_aware = """
+Extract optimal search keywords from the given research question, specifically optimized for '{source}' academic database.
 ### Source-Specific Guidelines:
 
 #### If targeting Semantic Scholar:
@@ -58,6 +58,14 @@ template_extract_keywords_source_aware = """Extract optimal search keywords from
 
 Now, extract optimized search keywords for {source} from this question:
 {user_query}"""
+
+template_query_variants = """
+You are an expert in academic search. Given a user query, generate {num_variants} different search queries that are useful for finding academic papers.
+Each query should be a concise phrase (3-7 words) that captures a key aspect of the user's information need.
+Avoid simply repeating the original query; provide diverse angles, e.g., one focused on methods, one on applications, one on challenges or comparisons.
+Output in JSON list format: ["query1", "query2", ...].
+User query: {user_query}
+"""
 
 template_query_domain_complex = """Determine if the academic domain below is a complex, specialized field that requires domain-specific terminology:
 

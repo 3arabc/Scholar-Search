@@ -1,428 +1,43 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Scholar Paper Search</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+template_user = """### **UserInput:**
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-        }
+Input: {user_query}
+Output:"""
 
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            background: white;
-            border-radius: 15px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            overflow: hidden;
-        }
+template_extract_keywords = """Suggest OpenAlex or SemanticScholar search API queries to retrieve relevant papers addressing the most recent research on the given question. The search queries should be concise, comma-separated, and highly relevant. Format your response as follows:
 
-        .header {
-            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
-            color: white;
-            padding: 30px;
-            text-align: center;
-        }
+**Example:**
 
-        .header h1 {
-            font-size: 2.5rem;
-            margin-bottom: 10px;
-        }
+Question: How have prior works incorporated personality attributes to train personalized dialogue generation models?
+Response:[Start] personalized dialogue generation, personalized language models, personalized dialogue[End]
 
-        .header p {
-            opacity: 0.9;
-            font-size: 1.1rem;
-        }
+---
 
-        .search-form {
-            padding: 40px;
-        }
+Now, generate search queries for the following question:
+Question: {user_query}
+Response:
+"""
 
-        .form-group {
-            margin-bottom: 25px;
-        }
+template_extract_keywords_source_aware = """Extract optimal search keywords from the given research question, specifically optimized for '{source}' academic database. Your task is to generate concise, comma-separated query terms that will maximize relevant paper retrieval in this specific platform.
 
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: #374151;
-        }
+### Source-Specific Guidelines:
 
-        .form-group input, .form-group textarea, .form-group select {
-            width: 100%;
-            padding: 12px 16px;
-            border: 2px solid #e5e7eb;
-            border-radius: 8px;
-            font-size: 16px;
-            transition: border-color 0.2s;
-        }
+#### If targeting Semantic Scholar:
+- Focus on technical terminology and core concepts
+- Include methodological terms
+- Consider author-centric keywords if prominent researchers are known
+- Emphasize computer science and AI terminology where relevant
 
-        .form-group input:focus, .form-group textarea:focus, .form-group select:focus {
-            outline: none;
-            border-color: #4f46e5;
-            box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
-        }
+#### If targeting OpenAlex:
+- Prioritize broader academic terms
+- Include interdisciplinary connections
+- Balance specificity with coverage
+- Include field classifications where relevant
 
-        .form-group textarea {
-            min-height: 100px;
-            resize: vertical;
-        }
-
-        .checkbox-group {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
-            margin-top: 10px;
-        }
-
-        .checkbox-item {
-            display: flex;
-            align-items: center;
-            padding: 10px;
-            border: 2px solid #e5e7eb;
-            border-radius: 8px;
-            transition: all 0.2s;
-        }
-
-        .checkbox-item:hover {
-            border-color: #4f46e5;
-        }
-
-        .checkbox-item input[type="checkbox"] {
-            width: auto;
-            margin-right: 8px;
-        }
-
-        .checkbox-item.checked {
-            border-color: #4f46e5;
-            background-color: #f0f9ff;
-        }
-
-        .advanced-options {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 20px;
-        }
-
-        .api-key-section {
-            background: #f0f9ff;
-            border: 1px solid #0ea5e9;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 25px;
-        }
-
-        .api-key-section h3 {
-            color: #0369a1;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-        }
-
-        .api-key-section h3::before {
-            content: "🔑";
-            margin-right: 8px;
-        }
-
-        .search-mode-section {
-            background: #f0fdf4;
-            border: 1px solid #22c55e;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 25px;
-        }
-
-        .search-mode-section h3 {
-            color: #15803d;
-            margin-bottom: 15px;
-            display: flex;
-            align-items: center;
-        }
-
-        .search-mode-section h3::before {
-            content: "⚙️";
-            margin-right: 8px;
-        }
-
-        .mode-selector {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 15px;
-        }
-
-        .mode-option {
-            flex: 1;
-            padding: 15px;
-            border: 2px solid #e5e7eb;
-            border-radius: 8px;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .mode-option:hover {
-            border-color: #4f46e5;
-        }
-
-        .mode-option.selected {
-            border-color: #4f46e5;
-            background-color: #f0f9ff;
-        }
-
-        .mode-title {
-            font-weight: 600;
-            margin-bottom: 8px;
-        }
-
-        .mode-description {
-            font-size: 14px;
-            color: #6b7280;
-            margin-bottom: 10px;
-        }
-
-        .mode-features {
-            font-size: 12px;
-            color: #9ca3af;
-        }
-
-        .advanced-params {
-            display: none;
-            margin-top: 15px;
-            padding-top: 15px;
-            border-top: 1px solid #e5e7eb;
-        }
-
-        .advanced-params.show {
-            display: block;
-        }
-
-        .help-text {
-            font-size: 14px;
-            color: #6b7280;
-            margin-top: 5px;
-            line-height: 1.4;
-        }
-
-        .help-text a {
-            color: #4f46e5;
-            text-decoration: none;
-        }
-
-        .help-text a:hover {
-            text-decoration: underline;
-        }
-
-        .search-btn {
-            width: 100%;
-            padding: 15px;
-            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 18px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-
-        .search-btn:hover {
-            transform: translateY(-2px);
-        }
-
-        .search-btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .loading {
-            display: none;
-            text-align: center;
-            padding: 40px;
-        }
-
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 4px solid #e5e7eb;
-            border-top: 4px solid #4f46e5;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 20px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .results {
-            display: none;
-            padding: 40px;
-            border-top: 1px solid #e5e7eb;
-        }
-
-        .results-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 30px;
-            padding-bottom: 15px;
-            border-bottom: 2px solid #e5e7eb;
-        }
-
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
-            margin-bottom: 30px;
-        }
-
-        .stat-card {
-            background: #f8fafc;
-            padding: 20px;
-            border-radius: 8px;
-            text-align: center;
-        }
-
-        .stat-number {
-            font-size: 2rem;
-            font-weight: bold;
-            color: #4f46e5;
-        }
-
-        .stat-label {
-            color: #6b7280;
-            margin-top: 5px;
-        }
-
-        .query-results {
-            margin-bottom: 40px;
-        }
-
-        .query-section {
-            margin-bottom: 30px;
-            border: 1px solid #e5e7eb;
-            border-radius: 8px;
-            overflow: hidden;
-        }
-
-        .query-header {
-            background: #f8fafc;
-            padding: 15px 20px;
-            border-bottom: 1px solid #e5e7eb;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .query-title {
-            font-weight: 600;
-            color: #374151;
-        }
-
-        .paper-count {
-            background: #4f46e5;
-            color: white;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 14px;
-        }
-
-        .papers-list {
-            max-height: 400px;
-            overflow-y: auto;
-        }
-
-        .paper-item {
-            padding: 20px;
-            border-bottom: 1px solid #f3f4f6;
-            transition: background-color 0.2s;
-        }
-
-        .paper-item:hover {
-            background-color: #f9fafb;
-        }
-
-        .paper-item:last-child {
-            border-bottom: none;
-        }
-
-        .paper-title {
-            font-weight: 600;
-            color: #1f2937;
-            margin-bottom: 8px;
-            line-height: 1.4;
-        }
-
-        .paper-title a {
-            color: #1f2937;
-            text-decoration: none;
-        }
-
-        .paper-title a:hover {
-            color: #4f46e5;
-            text-decoration: underline;
-        }
-
-        .paper-authors {
-            color: #6b7280;
-            margin-bottom: 8px;
-            font-size: 14px;
-        }
-
-        .paper-abstract {
-            color: #4b5563;
-            line-height: 1.5;
-            margin-bottom: 10px;
-        }
-
-        .paper-meta {
-            display: flex;
-            gap: 15px;
-            font-size: 12px;
-            color: #9ca3af;
-            flex-wrap: wrap;
-        }
-
-        .paper-links {
-            margin-top: 10px;
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-
-        .paper-link {
-            display: inline-flex;
-            align-items: center;
-            padding: 4px 8px;
-            background: #f3f4f6;
-            color: #4f46e5;
-            text-decoration: none;
-            border-radius: 4px;
-            font-size: 12px;
-            transition: background-color 0.2s;
-        }
-
-        .paper-link:hover {
-            background: #e5e7eb;
-        }
-
-        .paper-link::before {
-            content: "🔗";
-            margin-right: 4px;
-        }
-
+#### If targeting PubMed:
+- Emphasize medical/biological terminology
+- Include relevant MeSH (Medical Subject Headings) terms
+- Consider clinical and biomedical contexts
+- Include chemical/drug names or biological processes where relevant
         /* ===== 引用格式展示 ===== */
         .cite-btn {
             display: inline-flex;
@@ -526,21 +141,22 @@
             display: none;
         }
 
-        .search-tree-section.show {
-            display: block;
-        }
+### Key Enhancement:
+- **Actively infer synonyms and related technical terms** that are commonly used in this field, even if they do not appear verbatim in the query. For example, if the query mentions "world model", also include "latent dynamics", "state-space model", "predictive model". Similarly, for any domain, use your knowledge of the field to add relevant alternatives.
 
-        .tree-visualization {
-            background: white;
-            border: 1px solid #e5e7eb;
-            border-radius: 4px;
-            padding: 15px;
-            max-height: 300px;
-            overflow-y: auto;
-            font-family: monospace;
-            font-size: 12px;
-        }
+### Examples by Source:
+- Semantic Scholar: [Start] transformer architecture, attention mechanism, language model fine-tuning[End]
+- OpenAlex: [Start] neural networks, deep learning, artificial intelligence, pattern recognition[End]
+- PubMed: [Start] CRISPR-Cas9, gene editing, genetic therapy, chromosomal modification[End]
 
+### Output Format (MUST FOLLOW):
+[Start] keyword1, keyword2, keyword3, ...[End]
+
+### Rules:
+- Output ONLY the keyword list enclosed in [Start] and [End] tags.
+- Do NOT include any explanations, reasoning, or thinking process.
+- Do NOT add any text before or after the tags.
+- **DO NOT generalize**. Keep specific model names, acronyms, and technical terms. Avoid generic terms like "machine learning", "artificial intelligence" unless they are the only terms present.
         .error {
             background: #fef2f2;
             border: 1px solid #fecaca;
@@ -1024,112 +640,612 @@
                 }
             }
 
-            if (missingElements.length > 0) {
-                console.error(`❌ Missing elements: ${missingElements.join(', ')}`);
-                alert(`Page elements missing: ${missingElements.join(', ')}. Please refresh the page.`);
-                return;
+Now, extract optimized search keywords for {source} from this question:
+{user_query}"""
+
+template_query_variants = """
+You are an expert in academic search. Given a user query, generate {num_variants} different search queries that are useful for finding academic papers.
+Each query should be a concise phrase (3-7 words) that captures a key aspect of the user's information need.
+Avoid simply repeating the original query; provide diverse angles, e.g., one focused on methods, one on applications, one on challenges or comparisons.
+Output in JSON list format: ["query1", "query2", ...].
+User query: {user_query}
+"""
+
+template_query_domain_complex = """Determine if the academic domain below is a complex, specialized field that requires domain-specific terminology:
+
+Domain: {domain}
+
+A domain is complex/specialized if:
+1. It uses highly technical terminology not understood by general audience
+2. It has specialized methodologies or frameworks
+3. It combines multiple disciplines in a novel way
+4. It requires significant background knowledge to understand papers in the field
+
+Answer only "Yes" if it's a complex domain or "No" if it's a general domain."""
+
+
+template_query_intent = """Analyze this academic search query and provide:
+1. The primary research intent (e.g., literature review, finding recent work, exploring methodologies).
+2. The specific domain or field (e.g., machine learning, biology, economics).
+3. Time-sensitivity: Analyze the query for any time-related constraints.
+   - If a specific start year is mentioned (e.g., "since 2020", "after 2019"), format as 'YYYY-{current_year}' (e.g., "since 2020" becomes '2020-2025', assuming current year is 2025).
+   - For general recency terms (e.g., "recent", "latest", "current research"), describe as 'recent research' or 'last two years ({previous_year}-{current_year})'.
+   - For specific single years (e.g., "in 2021"), use 'YYYY'.
+   - For explicit ranges (e.g., "from 2019-2022", "between 2018 and 2020"), use 'YYYY-YYYY'.
+   - If no time constraint is present, state 'NO'.
+4. The most suitable academic sources for this query (choose from the following options):
+   - arxiv: Best for accessing the very latest preprints in rapidly evolving fields like Computer Science (especially AI/ML), Physics, and Mathematics. Ideal for cutting-edge, not-yet-peer-reviewed research.
+   - openalex: A comprehensive, interdisciplinary database with extensive metadata. Good for broad literature reviews, exploring connections between fields, or when a wide range of publication types is needed. Note: search relevance can sometimes be lower compared to arxiv.
+   - pubmed: The primary source for biomedical and life sciences research, including clinical trials, genetics, and healthcare-related studies.
+
+Query: "{query}"
+
+Respond in JSON format:
+{{
+"query_intent": "...",
+"domain": "...",
+"time_requirement_description": "e.g., '2020-2025', 'recent research', '2021', '2019-2022', 'NO'",
+"suitable_sources": ["source1", "source2"],
+"source_reason": "Briefly explain why these sources are most suitable for this query, considering intent, domain, and any time sensitivity."
+}}"""
+
+
+template_query_expand_judge_opt = """Evaluate if this academic search query needs expansion:
+
+Query: "{query}"
+Domain: "{domain}"
+
+A query needs expansion if:
+1. It's too general or broad for the domain
+2. It lacks specific technical terms that would improve search results
+3. It contains ambiguous terms that could be clarified
+4. It could benefit from including related concepts or methodologies
+5. It doesn't specify the type of papers sought (surveys, empirical studies, etc.)
+
+Does this query need expansion? Provide a yes/no answer with detailed reasoning.
+Respond in JSON format:
+{{
+"needs_expansion": true/false,
+"reason": "detailed explanation"
+}}"""
+
+template_query_judge = """Evaluate whether the given User Query is well-structured for retrieving relevant academic literature in scholarly databases (e.g., Google Scholar, PubMed, IEEE Xplore). Focus on clarity, specificity, and alignment with academic search conventions.
+
+### **Evaluation Criteria:**
+- Specificity: Does the query avoid vagueness (e.g., "studies about AI" → poor)?
+- Technicality: Does it include domain-specific terms (e.g., "transformer architectures in low-resource NLP")?
+- Actionability: Can it be directly used in academic search engines without reformulation?
+- Intent Clarity: Is the goal (e.g., review, comparison, methodology) evident?
+
+### **User Query:**
+<{user_query}>
+
+### **Response Format:**
+Respond strictly in the following format:
+
+```json
+["yes/no", "explain: <1-2 sentences explaining the judgment>"]
+```
+
+Now, generate your response following the **Response Format** strictly:
+
+**Response:**"""
+
+template_query_fusion_survery_forcus = """You are an academic search expert specializing in COMPREHENSIVE REVIEWS and SURVEY PAPERS.
+
+### TASK:
+Generate {user_input_N} queries optimized for finding SURVEY and REVIEW PAPERS on this research topic:
+"{user_query}"
+
+### REQUIREMENTS:
+1. Each query must EXPLICITLY target survey/review literature using terms like:
+   - "survey of..."
+   - "literature review..."
+   - "state-of-the-art in..."
+   - "systematic review..."
+   - "comparative analysis of..."
+
+2. Cover DISTINCT ASPECTS of the topic:
+   - Methods/approaches surveys
+   - Application domain surveys
+   - Historical development surveys
+   - Future directions/challenges
+
+3. **Use synonyms and related technical terms** to broaden the search. For example, if the query refers to "world models", also consider "latent dynamics models", "state-space models", "predictive models", "Dreamer", "PlaNet", etc. Include these variations naturally within the queries.
+
+4. **Time constraints**: DO NOT add any specific year or date range (e.g., "2020-2025") unless the user query explicitly mentions a specific year. For general terms like "recent" or "latest", do not convert them to explicit years – just keep them as "recent" or omit time indicators.
+
+5. Keep queries CONCISE (5-15 words) and directly usable in academic search engines.
+
+### OUTPUT FORMAT:
+Return a JSON object with this exact structure:
+{{
+  "expanded_queries": [
+    {{
+      "query": "Survey of [specific aspect] in [topic area]",
+      "reason": "Targets comprehensive reviews of [specific aspect]",
+      "survey_type": "[methodological/application/historical/future]"
+    }},
+    ...additional queries...
+  ]
+}}
+
+"""
+
+
+template_query_fusion_with_score_inst = """**Task:**
+Generate `N` mutually exclusive, survey-prioritized query expansions for an academic search engine (e.g., Google Scholar, Semantic Scholar) based on a user’s raw query. Ensure expansions retain the core intent while covering distinct angles (e.g., methodologies, reviews, applications).
+
+**Input:**
+- `raw_query`: User’s original query (e.g., *"weakly supervised learning in NLP"*).
+- `N`: Number of expansions (default: 3).
+
+**Output Format (JSON):**
+```json
+{
+  "expanded_queries": [
+    {
+      "query": "Concise expanded query string",
+      "reason": "1-sentence justification of intent preservation and survey focus",
+      "tags": ["survey", "methodology"]  // Optional thematic tags
+    },
+    ...
+  ],
+  "summary": "Brief overview of coverage diversity (e.g., 'Covers surveys, tools, and evaluation')"
+}
+```
+
+**Requirements:**
+1. **Precision**: Each query must be self-contained and actionable for academic search engines.
+2. **Survey Priority**: Prefer terms like *"survey"*, *"review"*, *"state-of-the-art"*, or *"systematic literature"*.
+3. **Diversity**: Ensure expansions are non-redundant (e.g., one for methods, one for applications).
+4. **Conciseness**: Keep queries under 15 words; reasons under 1 sentence.
+
+---
+
+### **Example Output**
+**Input:**
+- `raw_query`: "weakly supervised learning in NLP"
+- `N`: 3
+
+**Output:**
+```json
+{
+  "expanded_queries": [
+    {
+      "query": "Survey papers on weakly supervised learning techniques in NLP",
+      "reason": "Prioritizes comprehensive reviews of methodologies.",
+      "tags": ["survey", "methods"]
+    },
+    {
+      "query": "Weakly supervised NLP: applications and benchmarks",
+      "reason": "Shifts focus to real-world use cases and evaluation.",
+      "tags": ["applications", "evaluation"]
+    },
+    {
+      "query": "Systematic review of label efficiency in weakly supervised NLP",
+      "reason": "Narrows to label efficiency while retaining survey focus.",
+      "tags": ["survey", "labels"]
+    }
+  ],
+  "summary": "Covers surveys (methods, label efficiency) and applications."
+}
+```
+
+---
+
+"""
+
+
+# In instruction.py
+template_sim_enhanced = """You are evaluating the relevance of an academic document to a search query.
+
+Query: {user_query}
+
+Document Information:
+- Title: {title}
+- Abstract: {abstract}
+- Publication Year: {year}
+- Citations: {citation_count}
+- Field: {field_of_study}
+
+First, analyze the document structure:
+1. What research question does it address?
+2. What methodology does it use?
+3. What are its key findings?
+
+Then score relevance in these dimensions (0.0-1.0):
+- Query-Topic Match: How directly does it address the query topic?
+- Methodology Relevance: Does it use methods relevant to the query?
+- Results Applicability: Are the findings relevant to the query's intent?
+- Citation Impact: Is it highly cited in its field?
+- Recency: Is it recent enough given the field's pace of change?
+
+Output your analysis and final relevance score (0.0-1.0) in JSON format:
+{
+  "analysis": {
+    "research_question": "...",
+    "methodology": "...",
+    "key_findings": "..."
+  },
+  "scores": {
+    "query_topic_match": 0.0-1.0,
+    "methodology_relevance": 0.0-1.0,
+    "results_applicability": 0.0-1.0,
+    "citation_impact": 0.0-1.0,
+    "recency": 0.0-1.0
+  },
+  "overall_score": 0.0-1.0,
+  "justification": "Brief explanation of score"
+}
+"""
+
+
+# Add to instruction.py
+template_context_query_generation = """
+You are an academic search expert helping explore a research topic more thoroughly.
+
+### CONTEXT:
+- Original Query: "{user_query}"
+- Previously Searched Queries: {searched_queries}
+- Relevant Document Title: "{doc_title}"
+- Document Abstract: "{doc_abstract}"
+- Document Field: "{doc_field}"
+
+### TASK:
+Generate 3 NEW search queries that explore different aspects of this research area:
+
+1. A query exploring METHODOLOGICAL alternatives or comparisons
+2. A query focusing on APPLICATIONS or implementations
+3. A query addressing LIMITATIONS, challenges, or critiques
+
+Each query should be:
+- Clearly different from previously searched queries
+- Based on insights from the document
+- Relevant to the original research question
+- Specific enough to retrieve focused results
+
+### IMPORTANT NOTE:
+If document information is missing or insufficient (e.g., empty abstract), generate queries based primarily on the original query and your knowledge of the research domain. Focus on exploring complementary aspects of the topic rather than requiring specific document details.
+
+### OUTPUT FORMAT:
+Return a JSON array of strings containing only the expanded queries:
+["Query 1", "Query 2", "Query 3"]
+"""
+
+template_domain_aware_query_expansion = """You are an expert academic search query generator specializing in the field of {domain}.
+
+### TASK:
+Generate {user_input_N} TECHNICAL and SPECIALIZED search queries that will retrieve PRIMARY RESEARCH PAPERS relevant to:
+"{user_query}"
+
+### CONTEXT:
+- Research Intent: {intent}
+- Domain: {domain}
+
+### REQUIREMENTS:
+1. Use DOMAIN-SPECIFIC TERMINOLOGY that experts in {domain} would recognize.
+2. Include TECHNICAL SPECIFICATIONS relevant to the research question.
+3. Target EMPIRICAL STUDIES and PRIMARY RESEARCH rather than surveys.
+4. Explore different METHODOLOGICAL APPROACHES within {domain}.
+6. **Use synonyms and related technical terms** to broaden the search. For example, if the query refers to "world models", also consider "latent dynamics models", "state-space models", "predictive models", "Dreamer", "PlaNet", etc. Include these variations naturally within the queries.
+7. **Time constraints**: DO NOT add any specific year or date range (e.g., "2020-2025") unless the user query explicitly mentions a specific year. For general terms like "recent" or "latest", do not convert them to explicit years – just keep them as "recent" or omit time indicators.
+
+### OUTPUT FORMAT:
+Return a JSON object with this exact structure:
+
+{{
+  "expanded_queries": [
+    {{
+      "query": "Technical query with domain-specific terminology",
+      "reason": "Targets specific empirical work on [aspect]",
+      "technical_focus": "[methodology/dataset/theoretical framework/implementation]"
+    }},
+    ...additional queries...
+  ],
+  "domain_keywords": ["key1", "key2", "key3"]
+}}
+
+Remember to prioritize TECHNICAL PRECISION over general descriptions to help researchers find specialized papers in {domain}.
+"""
+
+
+template_query_fusion_with_score_user = """
+Now, generate N expanded queries based on the following input:
+- raw_query: "{user_query}"
+- N: {user_input_N}
+Output:
+"""
+
+
+template_query_fusion_pasa = """You are an expert in precise academic paper retrieval. The user needs to find VERY SPECIFIC papers.
+
+### TASK:
+Generate 3-4 HIGHLY SPECIFIC keyword-based search queries based on the User Query.
+
+### CRITICAL RULES (MUST FOLLOW):
+1. **PRESERVE ALL UNIQUE TERMS**: Identify any model names (e.g., "BERT", "GPT", "NeRF", "SAM", "Dreamer"), algorithm names, dataset names, acronyms, and specific methodology names in the query. Keep them exactly as they appear. **DO NOT** replace them with broader categories like "neural networks" or "machine learning".
+2. **NO BROAD TERMS**: Avoid adding generic terms like "deep learning", "artificial intelligence", "survey", "review", "recent advances" unless they are explicitly requested.
+3. **USE KEY PHRASES**: Combine the specific terms into short, tight phrases that mimic how these papers are typically referenced (e.g., "Segment Anything Model", "Attention Is All You Need", "BERT pre-training").
+4. **OUTPUT ONLY JSON**: Return a JSON list of strings.
+
+### EXAMPLES (to illustrate the rule):
+- User Query: "What paper introduced the Segment Anything Model?" → ["Segment Anything Model SAM", "SAM foundation model segmentation", "Segment Anything paper"]
+- User Query: "Which work first used transformers for language?" → ["Attention Is All You Need", "transformer architecture NLP", "original transformer paper"]
+- User Query: "Papers about Dreamer algorithm for RL" → ["Dreamer reinforcement learning", "Dreamer latent imagination", "DreamerV2 model-based RL"]
+- User Query: "Studies on neural radiance fields for view synthesis" → ["NeRF neural radiance fields", "NeRF view synthesis", "NeRF 3D reconstruction"]
+
+Now generate queries for:
+User Query: {user_query}
+
+### Output Format:
+["specific phrase 1", "specific phrase 2", "specific phrase 3"]
+**Output:**"""
+
+template_query_fusion = """Generate a **diverse set of mutually exclusive search queries** to retrieve **survey or review papers** relevant to the following **User Query:**
+**`<{user_query}>`**
+
+---
+
+### **Requirements:**
+1. **Survey Papers First:** Prioritize queries that retrieve **survey or review papers**.
+2. **Comprehensive Scope:** Cover **distinct and complementary** aspects of the topic.
+3. **Minimal Overlap:** Ensure queries are **mutually exclusive** and avoid redundancy.
+4. **Context-Aware Refinement:** If the **User Query is broad or ambiguous**, infer **specific research directions** for meaningful search queries.
+5. **Strict JSON Output:** Respond **only** with a **JSON-formatted list of strings**, with **no extra text or explanations**.
+
+---
+
+### **Output Format:**
+```json
+["Query1", "Query2", "QueryN"]
+```
+
+**Output:**"""
+
+template_query_fusion_based_on_context_inst = """### **Task:**
+In an **academic search scenario**, generate a set of **new, diverse, and mutually exclusive search queries** to improve the retrieval of relevant papers.
+
+---
+
+### **Input Parameters:**
+- **UserQuery:** `<{user_query}>` *(The original search query entered by the user.)*
+- **SearchedQueryList:** `<{searched_query_list}>` *(A list of queries that have already been searched.)*
+- **DocInfo:** `<{doc_info}>` *(Information about academic papers that better meet the search requirements, if SearchedQueryList is already very redundant, you can refer to this paper information to a certain extent)*
+
+---
+
+### **Requirements for New Queries:**
+1. **Survey Papers First:** Prioritize queries that retrieve **survey or review papers**.
+2. **Comprehensive Scope:** Cover **distinct and complementary** aspects of the topic.
+3. **Minimal Overlap:** Ensure queries are **mutually exclusive** and avoid redundancy.
+4. **Context-Aware Refinement:** If the **User Query is broad or ambiguous**, infer **specific research directions** for meaningful search queries.
+5. **Mutual Exclusivity:** **Avoid overlap** with any queries in **SearchedQueryList** to ensure exploration of new areas.
+6. **Context-Aware Expansion:** Use insights from **DocInfo** to refine search intent and generate more effective queries.
+7. **Strict JSON Output:** Respond **only** with a **JSON-formatted list of strings**, with **no extra text or explanations**.
+
+---
+"""
+template_query_fusion_based_on_context_output_format = """
+### **Output Format (Strict JSON List):**
+```json
+["NewQuery1", "NewQuery2", "NewQueryN"]
+```
+
+---
+
+**Output:**"""
+
+template_query_correct_and_enhance = """You are a query refinement assistant specializing in eliminating ambiguous semantics and correcting typos for search scenarios. Your task is to take a user-provided search query and refine it to improve clarity, remove ambiguity, and ensure it is free of spelling errors while preserving the original intent. Additionally, you must provide a **relevance score (0 to 1)** between the original query and the refined query, along with a brief explanation of how and why the query was modified.
+
+If the query is already clear, well-formed, and free of errors, do not modify it, and assign a relevance score of **1.0**.
+
+### **Input:**
+A raw academic search query provided by the user.
+
+### **Guidelines:**
+1. **Disambiguation**: Clarify vague terms by considering multiple possible meanings and selecting the most relevant one. If necessary, provide alternative interpretations.
+2. **Typo Correction**: Fix spelling errors while maintaining the intended meaning.
+3. **Conciseness**: Remove redundant words while keeping the query informative.
+4. **Relevance Score**: Assign a score between **0 and 1** based on how much the refined query deviates from the original, with **1.0** indicating minimal or no change.
+
+### **Output Format (JSON):**
+{
+    "original_query": "<User's original query>",
+    "refined_query": "<Disambiguated and typo-free query>",
+    "clarification": "<If any ambiguity was resolved, explain how>",
+    "relevance_score": <A float between 0 and 1 indicating how similar the refined query is to the original>,
+    "reason": "<Explanation of why the given relevance score was assigned>"
+}
+
+### **Example:**
+
+Input: What are the recent researches about LoRA?
+
+Output:
+{
+    "original_query": "What are the recent researches about LoRA?",
+    "refined_query": "What are the latest research papers on LoRA (Low-Rank Adaptation)?",
+    "clarification": "Clarified 'LoRA' to 'Low-Rank Adaptation' to remove ambiguity.",
+    "relevance_score": 0.9,
+    "reason": "The refined query preserves the original intent while improving specificity and correctness."
+}
+
+Ensure the response strictly follows this JSON format for easy parsing. Do not include any extra text or explanations outside of this format.
+"""
+
+template_query_expand = """You are an expert in academic search query refinement. Your task is to rewrite a given research query (or a list of queries) by maintaining its core intent while generating alternative queries that explore the same or similar research field or method. These rewritten queries should optimize search retrieval and enhance academic relevance. Additionally, provide a relevance score (ranging from 0 to 1) that quantifies the semantic similarity between the original query and each rewritten query.
+
+### **Input:**
+A raw academic search query provided by the user.
+
+### **Rewriting Guidelines:**
+1. **Field-Based Expansion**: Identify the core research domain of the query and generate alternative queries related to the same or closely related fields.
+2. **Method-Based Variation**: If the query focuses on a methodology, generate alternatives using similar or related techniques.
+3. **Terminology Enhancement**: Use precise academic terminology and relevant technical expressions to improve search effectiveness.
+4. **Diversity of Queries**: Provide multiple rewritten queries that explore different but related aspects of the research field or method.
+5. **Relevance Score**: Assign a similarity score (0 to 1) to each rewritten query based on its semantic closeness to the original query. A score of **1.0** indicates a near-identical meaning, while a score closer to **0.0** suggests lower relevance.
+
+### **Output Format (for easy result analysis):**
+Provide the results in structured JSON format as follows:
+[
+    {
+        "original_query": "<user_input_query>",
+        "rewritten_queries": [
+            {
+                "variation_type": "<Field-Based or Method-Based>",
+                "rewritten_query": "<new_query_text>",
+                "relation_to_original": "<brief_explanation_of_how_it_relates>"
+                "relevance_score": <numeric_value_between_0_and_1>
             }
+        ]
+    }
+]
 
-            // Handle search mode selection
-            const modeOptions = document.querySelectorAll('.mode-option');
-            const advancedParams = document.getElementById('advancedParams');
-            const searchModeInput = document.getElementById('searchMode');
-            const simpleSourcesGroup = document.getElementById('simpleSourcesGroup');
-            const simpleOptionsGroup = document.getElementById('simpleOptionsGroup');
+### **Example:**
 
-            if (modeOptions.length > 0) {
-                modeOptions.forEach(option => {
-                    option.addEventListener('click', function() {
-                        // Remove selected class from all options
-                        modeOptions.forEach(opt => opt.classList.remove('selected'));
-                        // Add selected class to clicked option
-                        this.classList.add('selected');
-
-                        const mode = this.dataset.mode;
-                        currentSearchMode = mode;
-                        if (searchModeInput) {
-                            searchModeInput.value = mode === 'advanced' ? 'true' : 'false';
-                        }
-
-                        if (mode === 'advanced') {
-                            if (advancedParams) advancedParams.classList.add('show');
-                            if (simpleSourcesGroup) simpleSourcesGroup.style.display = 'none';
-                            if (simpleOptionsGroup) simpleOptionsGroup.style.display = 'none';
-                        } else {
-                            if (advancedParams) advancedParams.classList.remove('show');
-                            if (simpleSourcesGroup) simpleSourcesGroup.style.display = 'block';
-                            if (simpleOptionsGroup) simpleOptionsGroup.style.display = 'block';
-                        }
-                    });
-                });
+Input: How does LoRA improve fine-tuning efficiency in NLP?
+Output:
+[
+    {
+        "original_query": "Fine-tuning BERT for sentiment analysis in social media.",
+        "rewritten_queries": [
+            {
+                "variation_type": "Field-Based",
+                "rewritten_query": "Fine-tuning BERT for emotion classification in online discussions.",
+                "relation_to_original": "Shifts focus from sentiment analysis to emotion classification while staying in the NLP domain.",
+                "relevance_score": 0.87
+            },
+            {
+                "variation_type": "Method-Based",
+                "rewritten_query": "Adapting RoBERTa for sentiment classification in user-generated content.",
+                "relation_to_original": "Explores a similar task but applies a different transformer model (RoBERTa instead of BERT).",
+                "relevance_score": 0.80,
             }
+        ]
+    }
+]
 
-            // Handle checkbox styling
-            const checkboxItems = document.querySelectorAll('.checkbox-item');
-            checkboxItems.forEach(item => {
-                const checkbox = item.querySelector('input[type="checkbox"]');
-                if (checkbox) {
-                    function updateStyle() {
-                        if (checkbox.checked) {
-                            item.classList.add('checked');
-                        } else {
-                            item.classList.remove('checked');
-                        }
-                    }
-                    checkbox.addEventListener('change', updateStyle);
-                    updateStyle(); // Initial call
-                }
-            });
+Ensure the output strictly follows the JSON format for easy parsing. Do not include extra explanations beyond the JSON output.
+"""
 
-            // Handle form submission
-            const searchForm = document.getElementById('searchForm');
-            if (searchForm) {
-                searchForm.addEventListener('submit', handleFormSubmit);
+template_query_expand_v2 = """You are an expert in academic search query refinement. Your task is to rewrite a given research query (or a list of queries) by maintaining its core intent while generating alternative queries that explore the same or similar research field or method. These rewritten queries should optimize search retrieval and enhance academic relevance. Additionally, provide a relevance score (ranging from 0 to 1) that quantifies the semantic similarity between the original query and each rewritten query.
+
+### **Input:**
+A raw academic search query provided by the user.
+
+### **Rewriting Guidelines:**
+1. **Field-Based Expansion**: Identify the core research domain of the query and generate alternative queries related to the same or closely related fields.
+2. **Method-Based Variation**: If the query focuses on a methodology, generate alternatives using similar or related techniques.
+3. **Terminology Enhancement**: Use precise academic terminology and relevant technical expressions to improve search effectiveness.
+4. **Diversity of Queries**: Provide multiple rewritten queries that explore different but related aspects of the research field or method.
+5. **Relevance Score**: Assign a similarity score (0 to 1) to each rewritten query based on its semantic closeness to the original query. A score of **1.0** indicates a near-identical meaning, while a score closer to **0.0** suggests lower relevance.
+
+### **Output Format (for easy result analysis):**
+Provide the results in structured JSON format as follows:
+```json
+{
+    "rewritten_queries": [
+        {
+            "variation_type": "<Field-Based or Method-Based>",
+            "rewritten_query": "<new_query_text>",
+            "relation_to_original": "<brief_explanation_of_how_it_relates>"
+            "relevance_score": <numeric_value_between_0_and_1>
+        }
+    ]
+}
+```
+
+### **Example:**
+
+Input: How does LoRA improve fine-tuning efficiency in NLP?
+Output:
+```json
+{
+    "rewritten_queries": [
+        {
+            "variation_type": "Field-Based",
+            "rewritten_query": "Fine-tuning BERT for emotion classification in online discussions.",
+            "relation_to_original": "Shifts focus from sentiment analysis to emotion classification while staying in the NLP domain.",
+            "relevance_score": 0.87
+        },
+        {
+            "variation_type": "Method-Based",
+            "rewritten_query": "Adapting RoBERTa for sentiment classification in user-generated content.",
+            "relation_to_original": "Explores a similar task but applies a different transformer model (RoBERTa instead of BERT).",
+            "relevance_score": 0.80,
+        }
+    ]
+}
+```
+
+Ensure the output strictly follows the JSON format for easy parsing. Do not include extra explanations beyond the JSON output.
+"""
+
+template_query_list_expand = """You are an expert in academic search query refinement. Your task is to rewrite a given research query (or a list of queries) by maintaining its core intent while generating alternative queries that explore the same or similar research field or method. These rewritten queries should optimize search retrieval and enhance academic relevance. Additionally, provide a relevance score (ranging from 0 to 1) that quantifies the semantic similarity between the original query and each rewritten query.
+
+### **Input:**
+A raw academic search query or a list of queries provided by the user.
+
+### **Rewriting Guidelines:**
+1. **Field-Based Expansion**: Identify the core research domain of the query and generate alternative queries related to the same or closely related fields.
+2. **Method-Based Variation**: If the query focuses on a methodology, generate alternatives using similar or related techniques.
+3. **Terminology Enhancement**: Use precise academic terminology and relevant technical expressions to improve search effectiveness.
+4. **Diversity of Queries**: Provide multiple rewritten queries that explore different but related aspects of the research field or method.
+5. **Relevance Score**: Assign a similarity score (0 to 1) to each rewritten query based on its semantic closeness to the original query. A score of **1.0** indicates a near-identical meaning, while a score closer to **0.0** suggests lower relevance.
+
+### **Output Format (for easy result analysis):**
+Provide the results in structured JSON format as follows:
+[
+    {
+        "original_query": "<user_input_query>",
+        "rewritten_queries": [
+            {
+                "variation_type": "<Field-Based or Method-Based>",
+                "rewritten_query": "<new_query_text>",
+                "relation_to_original": "<brief_explanation_of_how_it_relates>",
+                "relevance_score": <numeric_value_between_0_and_1>
+            },
+            {
+                "variation_type": "<Field-Based or Method-Based>",
+                "rewritten_query": "<new_query_text>",
+                "relation_to_original": "<brief_explanation_of_how_it_relates>",
+                "relevance_score": <numeric_value_between_0_and_1>
             }
-            // 初始化收藏夹
-            refreshFavorites().catch(err => console.warn('Failed to load favorites on init:', err));
-        });
+        ]
+    }
+]
 
-        async function handleFormSubmit(e) {
-            e.preventDefault();
+### **Example:**
 
-            console.log('📝 Form submitted');
-
-            const formData = new FormData(e.target);
-            const queries = formData.get('queries').split('\n').filter(q => q.trim());
-            const useAdvanced = formData.get('use_advanced_search') === 'true';
-
-            if (queries.length === 0) {
-                alert('Please enter at least one search query');
-                return;
+Input: ["How does LoRA improve fine-tuning efficiency in NLP?", "What are the latest advancements in contrastive learning for computer vision?"]
+Output:
+[
+    {
+        "original_query": "How does LoRA improve fine-tuning efficiency in NLP?",
+        "rewritten_queries": [
+            {
+                "variation_type": "Field-Based",
+                "rewritten_query": "How does adapter-based fine-tuning enhance efficiency in NLP?",
+                "relation_to_original": "Explores a broader category of adapter-based fine-tuning methods.",
+                "relevance_score": 0.92
+            },
+            {
+                "variation_type": "Method-Based",
+                "rewritten_query": "Comparing LoRA and prompt tuning for efficient model adaptation in NLP.",
+                "relation_to_original": "Includes an alternative fine-tuning technique (prompt tuning) for comparison.",
+                "relevance_score": 0.85
             }
-
-            let searchData = {
-                queries: queries,
-                google_serper_key: formData.get('google_serper_key') || '',
-                use_advanced_search: useAdvanced
-            };
-
-            if (useAdvanced) {
-                // Advanced search parameters
-                searchData.max_depth = parseInt(formData.get('max_depth'));
-                searchData.relevance_doc_num = parseInt(formData.get('relevance_doc_num'));
-                searchData.similarity_threshold = parseFloat(formData.get('similarity_threshold'));
-                searchData.end_date = formData.get('end_date') || '';
-            } else {
-                // Simple search parameters
-                const sources = formData.getAll('sources');
-                if (sources.length === 0) {
-                    alert('Please select at least one search source');
-                    return;
-                }
-                searchData.sources = sources;
-                searchData.end_date = formData.get('end_date') || '';
-                searchData.max_workers = parseInt(formData.get('max_workers'));
-                searchData.batch_size = parseInt(formData.get('batch_size'));
-
-
-            }
+        ]
+    },
+    {
+        "original_query": "What are the latest advancements in contrastive learning for computer vision?",
+        "rewritten_queries": [
+            {
+                "variation_type": "Field-Based",
+                "rewritten_query": "Recent progress in self-supervised contrastive learning for image recognition.",
+                "relation_to_original": "Focuses on self-supervised contrastive learning within computer vision.",
+                "relevance_score": 0.91
             // 获取筛选参数
             const filterYearStart = document.getElementById('filterYearStart')?.value;
             const filterYearEnd = document.getElementById('filterYearEnd')?.value;
@@ -1404,48 +1520,43 @@
                 if (loading) loading.style.display = 'none';
                 if (searchBtn) searchBtn.disabled = false;
             }
-        }
+        ]
+    }
+]
 
-        function showError(message) {
-            console.log('🚨 showError called with message:', message);
+Ensure the output strictly follows the JSON format for easy parsing. Do not include extra explanations beyond the JSON output.
+"""
 
-            // 尝试多种方式显示错误
-            try {
-                const results = document.getElementById('results');
+template_extract_prompt = """You are an expert in **academic information retrieval**. Your task is to **split a user-provided query into multiple concise search queries** optimized for academic search engines such as **Openalex,Semantic Scholar, Google Scholar, and ArXiv**.
+### **Input:**
+A raw academic search query  provided by the user.
 
-                if (!results) {
-                    console.error('❌ Results element not found in showError');
-                    alert(`Error: ${message}\n\nPlease refresh the page and try again.`);
-                    return;
-                }
+### **Guidelines for Query Splitting:**
+1. **Extract Core Concepts**: Identify key topics, methodologies, and terminologies from the query.
+2. **Generate Short Queries**: Break down the input into **short, meaningful, comma-separated queries** that capture the essence of the original query.
+3. **Maintain Search Optimization**: Ensure the generated queries are effective for retrieving relevant academic papers by including alternative phrasings or synonyms.
+4. **Format for Easy Parsing**: Return the results in a structured JSON format.
 
-                console.log('🔧 About to set error innerHTML...');
+### **Output Format:**
 
-                // 清除现有内容
-                results.innerHTML = '';
+{
+    "original_query": "<user_input_query>",
+    "search_query": "<short_query_1>, <short_query_2>, <short_query_3>, ..."
+}
 
-                // 创建错误内容
-                const errorHtml = `
-                    <div style="background: #fef2f2; border: 1px solid #fecaca; color: #dc2626; padding: 20px; border-radius: 8px; margin: 20px;">
-                        <h3 style="margin-bottom: 10px;">🚨 Search Error</h3>
-                        <p style="margin-bottom: 15px;">${message}</p>
-                        <button onclick="location.reload()" style="padding: 8px 16px; background: #dc2626; color: white; border: none; border-radius: 4px; cursor: pointer;">
-                            🔄 Reload Page
-                        </button>
-                    </div>
-                `;
 
-                results.innerHTML = errorHtml;
-                results.style.display = 'block';
+### **Example:**
 
-                console.log('✅ Error displayed successfully');
+Input: The impact of LoRA fine-tuning on transformer-based NLP models for low-resource languages.
 
-            } catch (innerError) {
-                console.error('❌ Error in showError function:', innerError);
-                alert(`Error: ${message}\n\nAdditional error displaying message: ${innerError.message}\n\nPlease refresh the page and try again.`);
-            }
-        }
+Output:
+{
+    "original_query": "The impact of LoRA fine-tuning on transformer-based NLP models for low-resource languages.",
+    "search_query": "LoRA fine-tuning, transformer NLP models, low-resource language NLP, LoRA for NLP, fine-tuning transformers"
+}
 
+Ensure that the output strictly follows this JSON structure without any extra explanations.
+"""
         // ===== 分类筛选相关状态与函数 =====
         let selectedCategories = new Set(); // 存储 "group|category" 键
 
@@ -1736,12 +1847,18 @@
             }
         }
 
-        function formatPaper(paper) {
-            if (!paper) {
-                console.warn('⚠️ formatPaper called with null/undefined paper');
-                return '<div class="paper-item">Invalid paper data</div>';
-            }
+template_extract_prompt_list = """You are an expert in **academic information retrieval and search query optimization**. Your task is to **split a given list of input queries** into concise, **short, and comma-separated search queries** that are well-structured for **academic paper retrieval**.
 
+### **Guidelines:**
+1. **Short & Concise**: The resulting search queries should use **essential academic keywords** while maintaining meaning.
+2. **Comma-Separated**: Format the final search queries as **comma-separated phrases** for use in academic search engines.
+3. **Query Optimization**:
+   - Remove unnecessary words while preserving **technical accuracy**.
+   - Ensure queries align with common academic **indexing and retrieval** best practices.
+   - Maintain relevance for **academic search engines like Semantic Scholar, Google Scholar, and ArXiv**.
+4. **Multiple Queries Handling**: If given multiple queries, process each separately and return structured results.
+
+### **Output Format (for easy parsing):**
             try {
                 const title = (paper.title || 'No title available').replace(/[<>]/g, ''); // 移除可能的HTML标签
                 const authors = paper.authors ?
@@ -1996,230 +2113,607 @@
                 return;
             }
 
-            try {
-                const dataStr = JSON.stringify(currentResults, null, 2);
-                const dataBlob = new Blob([dataStr], {type: 'application/json'});
-                const url = URL.createObjectURL(dataBlob);
-                const link = document.createElement('a');
-                link.href = url;
-                link.download = `search_results_${new Date().toISOString().split('T')[0]}.json`;
-                link.click();
-                URL.revokeObjectURL(url);
-            } catch (error) {
-                console.error('Export error:', error);
-                alert('Failed to export results');
-            }
-        }
-        // 获取收藏夹并更新 favoritesSet
-        function refreshFavorites() {
-            return fetch('/favorites')
-                .then(res => res.json())
-                .then(data => {
-                    currentFavorites = data.favorites || [];
-                    favoritesSet = new Set(currentFavorites.map(p => p.paper_id));
-                    return currentFavorites;
-                })
-                .catch(err => {
-                    console.error('Failed to load favorites:', err);
-                    return [];
-                });
-        }
+Return the result in **JSON format** as follows:
 
-        // 切换收藏状态
-        async function toggleFavorite(paperId, element) {
-            // 如果已收藏，则取消收藏
-            if (favoritesSet.has(paperId)) {
-                try {
-                    const res = await fetch(`/favorites/${paperId}`, { method: 'DELETE' });
-                    const data = await res.json();
-                    if (data.status === 'removed') {
-                        favoritesSet.delete(paperId);
-                        // 更新按钮样式
-                        if (element) {
-                            element.textContent = '☆';
-                            element.title = 'Add to favorites';
-                            element.style.color = '#9ca3af';
-                        }
-                        // 如果收藏夹模态框打开，刷新列表
-                        const modal = document.getElementById('favoritesModal');
-                        if (modal && modal.style.display === 'block') {
-                            loadFavoritesList();
-                        }
-                    }
-                } catch (err) {
-                    console.error('Failed to remove favorite:', err);
-                    alert('Failed to remove favorite.');
-                }
-            } else {
-                // 添加收藏
-                try {
-                    // 需要获取当前论文的完整数据
-                    // 从 currentResults 中查找该 paper_id 对应的数据
-                    const paperData = findPaperData(paperId);
-                    if (!paperData) {
-                        alert('Paper data not found.');
-                        return;
-                    }
-                    const res = await fetch(`/favorites/${paperId}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(paperData)
-                    });
-                    const data = await res.json();
-                    if (data.status === 'added' || data.status === 'already_exists') {
-                        favoritesSet.add(paperId);
-                        if (element) {
-                            element.textContent = '★';
-                            element.title = 'Remove from favorites';
-                            element.style.color = '#f59e0b';
-                        }
-                        // 如果收藏夹模态框打开，刷新列表
-                        const modal = document.getElementById('favoritesModal');
-                        if (modal && modal.style.display === 'block') {
-                            loadFavoritesList();
-                        }
-                    }
-                } catch (err) {
-                    console.error('Failed to add favorite:', err);
-                    alert('Failed to add favorite.');
-                }
-            }
+{
+    "original_queries": ["<original_query_1>", "<original_query_2>", ...],
+    "processed_queries": [
+        {
+            "original_query": "<original_query_1>",
+            "search_queries": "<optimized_query_1>, <optimized_query_2>, <optimized_query_3>"
+        },
+        {
+            "original_query": "<original_query_2>",
+            "search_queries": "<optimized_query_1>, <optimized_query_2>, <optimized_query_3>"
         }
+    ]
+}
 
-        // 根据 paper_id 查找论文数据
-        function findPaperData(paperId) {
-            if (!currentResults) return null;
-            // 遍历 all_papers
-            if (currentResults.all_papers && currentResults.all_papers[paperId]) {
-                return currentResults.all_papers[paperId];
-            }
-            // 遍历 query_results
-            for (const query in currentResults.query_results) {
-                const papers = currentResults.query_results[query];
-                for (const paper of papers) {
-                    if (paper.paper_id === paperId) {
-                        return paper;
-                    }
-                }
-            }
-            return null;
+
+### **Example:**
+
+Input:
+[
+    "How do retrieval-augmented LMs perform well in knowledge-intensive tasks?",
+    "What are the latest advancements in multimodal large language models?"
+]
+
+Output:
+{
+    "original_queries": [
+        "How do retrieval-augmented LMs perform well in knowledge-intensive tasks?",
+        "What are the latest advancements in multimodal large language models?"
+    ],
+    "processed_queries": [
+        {
+            "original_query": "How do retrieval-augmented LMs perform well in knowledge-intensive tasks?",
+            "search_queries": "retrieval-augmented LMs, knowledge-intensive tasks, large language models for knowledge-intensive tasks, retrieval-augmented generation"
+        },
+        {
+            "original_query": "What are the latest advancements in multimodal large language models?",
+            "search_queries": "multimodal large language models, vision-language models, multimodal transformers, cross-modal learning"
         }
+    ]
+}
 
-        // 打开收藏夹模态框
-        function openFavorites() {
-            const modal = document.getElementById('favoritesModal');
-            modal.style.display = 'block';
-            loadFavoritesList();
-        }
+Ensure that the output strictly follows this JSON structure without any extra explanations.
 
-        function closeFavoritesModal() {
-            document.getElementById('favoritesModal').style.display = 'none';
-        }
+"""
 
-        // 加载收藏夹列表
-        function loadFavoritesList() {
-            const container = document.getElementById('favoritesList');
-            container.innerHTML = '<p>Loading...</p>';
-            refreshFavorites().then(favorites => {
-                if (!favorites || favorites.length === 0) {
-                    container.innerHTML = '<p>No favorites yet.</p>';
-                    return;
-                }
-                // 复用 formatPaper 渲染
-                const html = favorites.map(paper => formatPaper(paper)).join('');
-                container.innerHTML = html;
-                // 为每个论文的收藏按钮更新状态（因为 formatPaper 生成的是☆，需要根据favoritesSet设置样式）
-                // 但 formatPaper 会生成按钮，我们在生成时根据 favoritesSet 决定初始样式
-                // 但由于 formatPaper 是静态生成的，我们需要在生成后修正
-                // 更好的方式：在 formatPaper 中根据全局 favoritesSet 决定。
-                // 我们将在下面对 formatPaper 进行修改，使其在生成时自动检测。
-            });
-        }
+template_expand_query_based_query_and_doc = """You are an expert in **academic search, information retrieval, and relevance assessment**. Your task is to analyze an **original search query** and the **content of a reference document**, determine their relevance, and **generate a refined academic search statement** if they are related. Additionally, provide a **clear explanation of relevance**, **extract search-friendly keywords**, and assign a **relevance score (0-1) between the original query and the new search query**.
 
-        // 打开历史模态框
-        function loadHistory() {
-            const modal = document.getElementById('historyModal');
-            modal.style.display = 'block';
-            document.getElementById('historyList').innerHTML = '<p>Loading...</p>';
+### **Input:**
+- **Original Query**: A user-provided search statement.
+- **Reference Document**: Contains academic metadata including **title, authors, abstract, and field information**.
 
-            fetch('/history')
-                .then(res => res.json())
-                .then(data => {
-                    const list = data.history;
-                    if (!list || list.length === 0) {
-                        document.getElementById('historyList').innerHTML = '<p>No history found.</p>';
-                        return;
-                    }
-                    let html = '<ul style="list-style: none; padding: 0;">';
-                    list.forEach(item => {
-                        const time = new Date(item.timestamp).toLocaleString();
-                        html += `<li style="padding: 10px; border-bottom: 1px solid #e5e7eb; cursor: pointer;" onclick="loadHistoryEntry('${item.id}')">
-                                    <div style="font-weight: 500;">${item.query}</div>
-                                    <div style="font-size: 12px; color: #6b7280;">${time}</div>
-                                </li>`;
-                    });
-                    html += '</ul>';
-                    document.getElementById('historyList').innerHTML = html;
-                })
-                .catch(err => {
-                    document.getElementById('historyList').innerHTML = '<p style="color: red;">Failed to load history.</p>';
-                });
-        }
 
-        function closeHistoryModal() {
-            document.getElementById('historyModal').style.display = 'none';
-        }
+### **Processing Steps:**
 
-        // 加载指定历史记录
-        function loadHistoryEntry(historyId) {
-            closeHistoryModal();
-            // 显示加载状态
-            const loading = document.getElementById('loading');
-            const results = document.getElementById('results');
-            loading.style.display = 'block';
-            results.style.display = 'none';
+1. **Relevance Determination**:
+   - Compare the **semantic meaning** and **research focus** of the **original query** and the **reference document**.
+   - If the document is **relevant**, proceed to generate a **new search statement**.
+   - If the document is **not relevant**, do not generate a new query and return **relevance score (0-1)** is 0.
+   - Assign a **relevance score (0-1)** that quantifies the similarity between the **original query** and the **new search query** (if applicable).
 
-            fetch(`/history/${historyId}`)
-                .then(res => {
-                    if (!res.ok) throw new Error('Failed to load history');
-                    return res.json();
-                })
-                .then(data => {
-                    const responseData = data.response;
-                    currentResults = responseData;
-                    displayResults(responseData);
-                    loading.style.display = 'none';
-                    results.style.display = 'block';
-                })
-                .catch(err => {
-                    loading.style.display = 'none';
-                    showError(`Failed to load history: ${err.message}`);
-                });
-        }
-    </script>
-<!-- 历史记录弹出层 -->
-<div id="historyModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 1000;">
-    <div style="background: white; max-width: 600px; margin: 50px auto; padding: 20px; border-radius: 12px; max-height: 80vh; overflow-y: auto;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-            <h3>Search History</h3>
-            <button onclick="closeHistoryModal()" style="background: none; border: none; font-size: 24px; cursor: pointer;">&times;</button>
-        </div>
-        <div id="historyList">
-            <p>Loading...</p>
-        </div>
-    </div>
-</div>
-<!-- 收藏夹弹出层 -->
-<div id="favoritesModal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 1000;">
-    <div style="background: white; max-width: 800px; margin: 50px auto; padding: 20px; border-radius: 12px; max-height: 80vh; overflow-y: auto;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-            <h3>⭐ My Favorites</h3>
-            <button onclick="closeFavoritesModal()" style="background: none; border: none; font-size: 24px; cursor: pointer;">&times;</button>
-        </div>
-        <div id="favoritesList">
-            <p>Loading...</p>
-        </div>
-    </div>
-</div>
-</body>
-</html>
+2. **New Search Statement Generation** (If Related):
+   - Generate a refined **academic search query** that integrates insights from the reference document.
+   - The new query should **expand or refine the original topic** while maintaining academic relevance.
+
+3. **Keyword Extraction for Search Optimization** (If a New Query is Generated):
+   - Extract **short, keyword-based phrases** from the new query.
+   - Ensure keywords are **comma-separated** and suitable for use in academic search engines (e.g., **Semantic Scholar, Google Scholar, ArXiv**).
+
+4. **Explanation of Relevance**:
+   - Provide a **brief but clear explanation** of why the original query and the reference document are (or are not) related.
+
+
+### **Output Format (Structured for Easy Parsing):**
+Return the output in **JSON format** as follows:
+
+{
+    "relevance_assessment": {
+        "is_related": "<true/false>",
+        "explanation": "<reasoning_behind_relevance_decision>",
+        "relevance_score": "<value_between_0_and_1>"
+    },
+    "new_search_query": "<generated_academic_search_query_if_applicable>",
+    "search_keywords": "<comma_separated_keywords_if_applicable>"
+}
+
+
+### **Example Execution:**
+
+#### **Input:**
+{
+    "original_query": "How do retrieval-augmented language models improve factual accuracy?",
+    "reference_document": {
+        "title": "Enhancing Knowledge Recall in Language Models with Retrieval-Augmented Generation",
+        "authors": ["John Doe", "Jane Smith"],
+        "abstract": "This paper explores retrieval-augmented generation (RAG) models, demonstrating their effectiveness in improving factual accuracy through external knowledge retrieval.",
+        "fieldsOfStudy": "Natural Language Processing",
+        "publicationYear": 2024
+    }
+}
+
+#### **Output:**
+{
+    "relevance_assessment": {
+        "is_related": "true",
+        "explanation": "The reference document discusses retrieval-augmented generation (RAG), which directly relates to improving factual accuracy in language models.",
+        "relevance_score": "0.92"
+    },
+    "new_search_query": "Retrieval-augmented generation for improving factual accuracy in language models",
+    "search_keywords": "retrieval-augmented generation, factual accuracy, language models, knowledge retrieval"
+}
+
+Ensure the output strictly follows the JSON format for easy parsing. Do not include extra explanations beyond the JSON output.
+"""
+
+template_sim_between_query_doc = """You are an expert in **academic search, information retrieval, and relevance assessment**. Your task is to analyze a **search query** and a **reference academic article**, determine their **relevance**, and provide a **multidimensional assessment** considering various professional and academic perspectives.
+
+#### **Input:**
+- **Search Query:** A user-provided search statement.
+- **Reference Document:** Contains **title, authors, abstract, citationsCount (total number of papers that references this paper), year (the year the paper was published) and field information (a list of the paper’s high-level academic categories from external sources)**.
+
+#### **Evaluation Criteria:**
+Assess the relevance with scores from 0.0 (completely irrelevant) to 1.0 (perfect match) based on:
+
+1. **Conceptual Similarity**:
+   - Does the document discuss the same or closely related concepts?
+2. **Methodological Alignment**:
+   - Does the paper employ research methods relevant to the query’s intent?
+3. **Disciplinary Perspective**:
+   - Does the document belong to the same field or an adjacent interdisciplinary domain?
+4. **Problem-Solution Relevance**:
+   - Does the article address the same research problem as the query implies?
+5. **Citations and Influence**:
+   - Is the document highly cited in the field relevant to the query?
+6. **Temporal Relevance**:
+   - Is the publication date suitable for addressing the latest research trends?
+
+#### **Model Output Format:**
+Return a structured JSON object with a **relevance score (0.0-1.0)** and detailed explanations for each evaluation criterion.
+
+{
+  "conceptual_similarity": { "score": 0.0-1.0, "explanation": "<simple and crucial>" },
+  "methodological_alignment": { "score": 0.0-1.0, "explanation": "<simple and crucial>" },
+  "disciplinary_perspective": { "score": 0.0-1.0, "explanation": "<simple and crucial>" },
+  "problem_solution_relevance": { "score": 0.0-1.0, "explanation": "<simple and crucial>" },
+  "citations_influence": { "score": 0.0-1.0, "explanation": "<simple and crucial>" },
+  "temporal_relevance": { "score": 0.0-1.0, "explanation": "<simple and crucial>" }
+}
+
+### **Example**
+
+Input:
+{
+  "query": "Deep reinforcement learning for robotic manipulation in dynamic environments",
+  "reference_document": {
+    "title": "A Survey on Deep Reinforcement Learning for Robotic Control",
+    "authors": ["John Doe", "Jane Smith"],
+    "abstract": "This paper provides a comprehensive survey of deep reinforcement learning (DRL) applications in robotic control. It covers various DRL algorithms, their adaptations for robotics, and challenges in real-world deployment.",
+    "fieldsOfStudy": ["Artificial Intelligence", "Robotics"],
+    "citationsCount": 2,
+    "publicationYear": 2021,
+  }
+}
+
+Output:
+{
+  "conceptual_similarity": {"score": 0.9, "explanation": "The document discusses DRL in robotics, which strongly aligns with the query." },
+  "methodological_alignment": {"score": 0.7, "explanation": "The paper is a survey, summarizing DRL techniques rather than presenting new empirical findings on robotic manipulation in dynamic environments." },
+  "disciplinary_perspective": {"score": 0.95, "explanation": "The document belongs to AI and Robotics, making it highly relevant to the query’s domain." },
+  "problem_solution_relevance": {"score": 0.6, "explanation": "The paper covers general DRL applications but does not specifically focus on dynamic environments or robotic manipulation." },
+  "citations_influence": {"score": 0.4, "explanation": "The document has only 2 citations, indicating limited influence in the field." },
+  "temporal_relevance": {"score": 0.7, "explanation": "The paper was published in 2021. In the fast-evolving fields of artificial intelligence and robotics, it can still provide relevant and up-to-date information about deep reinforcement learning for robotic control, but it may not cover the very latest research trends." }
+}
+
+Ensure the output strictly follows the JSON format for easy parsing. Do not include extra explanations beyond the JSON output.
+"""
+
+template_sim_between_query_doc_v2_instruction = """You are an expert in **academic search, information retrieval, and relevance assessment**. Your task is to analyze a **search query** and a **reference academic article**, determine their **relevance**, and provide a **multidimensional assessment** considering various professional and academic perspectives.
+
+#### **Input:**
+- **Search Query:** A user-provided search statement.
+- **Reference Document:** Contains **title, authors, abstract, citationsCount (total number of papers that references this paper), year (the year the paper was published) and field information (a list of the paper’s high-level academic categories from external sources)**.
+- **Current Year:** {CURRENT_YEAR} (for assessing temporal relevance).
+
+#### **Evaluation Criteria:**
+Assess the relevance with scores from 0.0 (completely irrelevant) to 1.0 (perfect match) based on the following dimensions:
+1. **Conceptual Similarity**: Does the document discuss the same or closely related concepts?
+2. **Methodological Alignment**: Does the paper employ research methods relevant to the query’s intent?
+3. **Disciplinary Perspective**: Does the document belong to the same field or an adjacent interdisciplinary domain?
+4. **Problem-Solution Relevance**: Does the article address the same research problem as the query implies?
+5. **Citations and Influence**: Is the document highly cited in the field relevant to the query?
+6. **Temporal Relevance**: Is the publication date suitable given the current year and the field’s pace of change?
+
+If any field in the reference document is missing (e.g., abstract or citationsCount), assign a lower score (e.g., 0.3) for the affected criterion and note the absence in the explanation.
+"""
+
+template_sim_between_query_doc_v2_format = """
+#### **Model Output Format:**
+Return a structured JSON object with a **relevance score (0.0-1.0)** and detailed, concise explanations for each criterion.
+```json
+{
+  "conceptual_similarity": { "score": 0.0-1.0, "explanation": "<simple and crucial>" },
+  "methodological_alignment": { "score": 0.0-1.0, "explanation": "<simple and crucial>" },
+  "disciplinary_perspective": { "score": 0.0-1.0, "explanation": "<simple and crucial>" },
+  "problem_solution_relevance": { "score": 0.0-1.0, "explanation": "<simple and crucial>" },
+  "citations_influence": { "score": 0.0-1.0, "explanation": "<simple and crucial>" },
+  "temporal_relevance": { "score": 0.0-1.0, "explanation": "<simple and crucial>" }
+}
+```
+
+Ensure the output strictly follows the JSON format for easy parsing. Do not include extra explanations beyond the JSON output.
+
+"""
+
+template_expand_query_based_query_and_batch_doc = """You are an expert in academic literature search and query expansion. Given an original user query, a list of previously used search queries, and a set of relevant academic documents, your task is to generate **N diverse new queries** that help refine and expand the search. The newly generated queries should be relevant to the **user query** while ensuring **diversity** from the queries already used. Additionally, provide a similarity score between each new query and the user query and a brief explanation of how each query was derived.
+
+### **Input Format:**
+- **N**: The number of new queries to generate (e.g., 3).
+- **user_query**: The original query input by the user.
+- **search_query_list**: A list of queries that have already been used for searching.
+- **relevance_doc**: A list of related academic articles, each containing the following fields:
+  - `title`: The title of the paper
+  - `authors`: The authors of the paper
+  - `abstract`: A brief summary of the paper
+  - `fieldofstudy`: The research domain of the paper
+  - `publicationYear`: The publication year
+  - *(other relevant metadata if available)*
+
+### **Task Requirements:**
+1. **Generate N new search queries** based on the **user_query** and insights from **relevance_doc**.
+2. **Ensure diversity**: The newly generated queries should be meaningfully different from those in **search_query_list** to improve search coverage.
+3. **For each new query, provide the following information**:
+   - **query_text**: The generated query.
+   - **similarity_score**: A numerical value (0-1) representing its similarity to **user_query** (1 being identical, 0 being completely unrelated).
+   - **explanation**: A brief explanation of how the query was formed (e.g., inspired by specific fields of study, key terms from abstracts, alternative phrasing, etc.).
+
+### **Output Format (JSON structured for easy parsing):**
+```json
+{
+  "new_queries": [
+    {
+      "query_text": "<Generated query 1>",
+      "similarity_score": 0.85,
+      "explanation": "Derived from key terms in related papers focusing on [specific aspect]."
+    },
+    {
+      "query_text": "<Generated query 2>",
+      "similarity_score": 0.78,
+      "explanation": "Inspired by alternative terminology in the field of [field name]."
+    },
+    ...
+  ]
+}
+```
+
+Ensure that the generated queries are **high-quality, relevant, and diverse** while maintaining a structured format for downstream processing.
+"""
+
+template_expand_query_based_query_and_batch_doc_v2 = """You are an expert in academic literature search and query expansion. Given an original user query, a list of previously used search queries, and a set of relevant academic documents, your task is to generate **N diverse new queries** that refine and expand the search. The new queries must be highly relevant to the **user_query**, leverage insights from **relevance_doc**, and ensure **diversity** from **search_query_list** by exploring different vocabulary, research perspectives, or methodologies. Provide a similarity score and explanation for each new query.
+
+### **Input Format:**
+- **user_query**: The original query input by the user (e.g., "machine learning for medical imaging").
+- **search_query_list**: A list of queries already used (e.g., ["deep learning in medical diagnostics", "ML for radiology"]).
+- **relevance_doc**: A list of related academic articles, each containing:
+  - `title`: The title of the paper.
+  - `authors`: The authors of the paper.
+  - `abstract`: A brief summary of the paper.
+  - `fieldofstudy`: The research domain of the paper.
+  - `publicationYear`: The publication year.
+- **N**: The number of new queries to generate (e.g., 3).
+
+### **Task Requirements:**
+1. **Generate N new search queries** by leveraging **user_query**, insights from **relevance_doc** (e.g., recent trends from publicationYear, interdisciplinary angles from fieldofstudy), and gaps in **search_query_list**.
+2. **Ensure diversity**: New queries should differ from **search_query_list** in terms of vocabulary, research perspective, or methodology, maximizing search coverage. Analyze **search_query_list** to identify overused terms or unexplored aspects.
+3. **For each new query, provide**:
+   - **query_text**: The generated query.
+   - **similarity_score**: A value (0-1) based on keyword overlap and semantic relevance to **user_query** (1 = identical, 0 = unrelated).
+   - **explanation**: A brief explanation of how the query was formed (e.g., inspired by abstracts, fields of study, or alternative phrasing).
+
+### **Output Format (JSON):**
+```json
+{
+  "new_queries": [
+    {
+      "query_text": "<Generated query 1>",
+      "similarity_score": 0.85,
+      "explanation": "Derived from key terms in related papers focusing on [specific aspect]."
+    },
+    {
+      "query_text": "<Generated query 2>",
+      "similarity_score": 0.78,
+      "explanation": "Inspired by alternative terminology in the field of [field name]."
+    },
+    ...
+  ]
+}
+```
+
+Ensure the generated queries are high-quality, relevant, and diverse, strictly following the JSON format.
+"""
+
+template_sim_between_query_doc_v2_inst = """### **Task:**
+Evaluate whether the provided academic document (**Doc**) sufficiently satisfies the **scholarly paper search demand** of the **UserQuery**. You MUST be strict and discriminative — most papers are only partially relevant at best.
+
+---
+
+### **Input Data:**
+- **Search Time:** {searchTime}
+- **UserQuery:** {userQuery}
+- **Document Details:**
+  - **Title:** {Title}
+  - **Abstract:** {Abstract}
+  - **Author (if available):** {Author}
+  - **fields Of Study (if available):** {fieldsOfStudy}
+  - **Publication Year (if available):** {publicationYear}
+
+---
+
+### **Evaluation Criteria & Scoring (0-5 Scale):**
+
+For each dimension, use the following anchor definitions:
+
+**1. Topic Match — Does the core topic align with the query?**
+  - 5: Title or abstract uses the SAME key technical terms as the query
+  - 4: Topic is directly in the same sub-area, closely related terminology
+  - 3: Topic is in the broader field but not the specific sub-area
+  - 2: Only peripherally related (shares some high-level concepts)
+  - 1: Completely different research topic
+
+**2. Contextual Relevance — Does it address the specific intent of the query?**
+  - 5: Directly answers the query's research question or fills the gap described
+  - 4: Addresses the same intent from a related angle
+  - 3: Related but addresses a different aspect than what the query asks
+  - 2: Mentions the general area but does not engage with the query's intent
+  - 1: No connection to the query's intent
+
+**3. Depth & Completeness — Is the treatment thorough enough?**
+  - 5: Full experimental results, rigorous evaluation, substantial theoretical contribution
+  - 4: Solid methodology with meaningful analysis
+  - 3: Preliminary results, limited evaluation, or primarily a position/opinion piece
+  - 2: Brief mention, no experiments or substantial analysis
+  - 1: Abstract only, no substantive content
+
+**Important:** Score STRICTLY. A score of 4 or 5 should be rare — most retrieved papers will score 1-3 on most dimensions.
+"""
+
+template_sim_between_query_doc_v2_example = """
+### **Example:**
+
+**UserQuery:** "Transformer architectures for efficient long-document processing"
+
+**Document:**
+- Title: Longformer: The Long-Document Transformer
+- Abstract: We introduce Longformer, a modified Transformer architecture for processing long documents, with a sliding window attention pattern that scales linearly with sequence length...
+- Publication Year: 2020
+
+**Correct Output:**
+```json
+{
+  "topic_match": 5,
+  "contextual_relevance": 5,
+  "depth_completeness": 4,
+  "final_decision": "Relevant",
+  "justification": "Directly addresses efficient Transformer for long documents, with novel attention mechanism and thorough evaluation."
+}
+```
+
+---
+
+### **Output Format (Structured JSON):**
+```json
+{
+  "topic_match": X,
+  "contextual_relevance": X,
+  "depth_completeness": X,
+  "final_decision": "Relevant" / "Partially Relevant" / "Not Relevant",
+  "justification": "Brief explanation of why the document does or does not meet the search demand."
+}
+```
+
+---
+
+### **Decision Guidelines:**
+- **Relevant:** All scores **≥ 4**
+- **Partially Relevant:** At least **two scores = 3**
+- **Not Relevant:** Most scores **≤ 2**
+
+Ensure the response strictly follows given JSON format for easy parsing. Do not include any extra text or explanations outside of this format.
+
+**Output:**"""
+
+template_rerank_doc = """You are an expert in academic research evaluation. Your task is to assess the **authority** and **timeliness** of a user’s search query: <{user_query}> and the recalled academic papers.
+
+### **Evaluation Criteria:**
+
+#### **1. Authority Score (0-1) – How reputable is the paper?**
+Assign a **normalized score** between 0 and 1 based on:
+- **Citation Count:** Higher citations indicate greater influence.
+  - (≥1000 citations → 1.0, 500-999 → 0.8, 100-499 → 0.6, 10-99 → 0.4, <10 → 0.2).
+- **Journal/Conference Reputation:** Is it a top-tier venue?
+  - (Top-tier journal/conference → +0.2, mid-tier → +0.1, unknown → 0).
+- **Author Credentials:** Are the authors well-cited experts?
+  - (Highly cited authors → +0.2, moderately cited → +0.1, unknown → 0).
+
+#### **2. Timeliness Score (0-1) – How relevant is the paper’s publication date?**
+Assign a **normalized score** between 0 and 1 based on:
+- **Publication Year:**
+  - (Published in the last 2 years → 1.0, 3-5 years → 0.8, 6-10 years → 0.6, >10 years → 0.4).
+- **Recent Citations (Last 5 Years):**
+  - (≥100 recent citations in the last 5 years → +0.2, 50-99 → +0.1, <50 → 0).
+- **Field-Specific Relevance:**
+  - (Fast-changing fields like AI, biotech → prioritize recent papers).
+
+### **Input:**
+Each academic paper includes:
+- **Title:** {title}
+- **Authors:** {authors}
+- **Publication Year:** <{pub_year}>
+- **Journal/Conference:**: <{journal}>
+- **Citation Count:** <{cite_count}>
+- **Recent Citations (last 5 years):** <{five_years_cite_num}>
+
+### **Output Format (Strict JSON Format):**
+```json
+{
+    "authority_score": <float>,
+    "timeliness_score": <float>,
+    "evaluation": "<Brief justification for the assigned scores>"
+}
+```
+---
+
+### **Guidelines:**
+- **Strictly adhere to JSON format** to ensure seamless parsing.
+- **Use the scoring rules explicitly**—no subjective judgments.
+- **Keep the evaluation concise** (max 2 sentences).
+- **Do not include extra explanations** beyond the required output.
+---
+**Output:**"""
+
+template_from_pasa = """You are an expert in academic research. Given a query and a document in the context of a scholarly paper search, evaluate their relevance on a scale from 0 to 1, where 0 means completely irrelevant and 1 means highly relevant. Base your evaluation on the query’s intent, key concepts, and the document’s content. Provide a score and explain your reasoning consistently.
+
+Query: {user_query}
+Document:
+Title: {title}
+Abstract: {abstract}
+
+Score: [Your score between 0 and 1]
+Reasoning: [Your explanation]
+"""
+
+template_from_pasa_refine = """You are an expert in academic information retrieval and relevance assessment. Given a user query and a scholarly document (title and abstract), assess how relevant the document is to the query on a scale from 0 to 1:
+
+* 0 means completely irrelevant.
+* 1 means highly relevant.
+
+Your assessment should be based on the intent of the query, the key concepts it expresses, and how well these are addressed or reflected in the document. Return both:
+
+* A numerical score (between 0 and 1).
+* A concise and well-reasoned explanation that justifies the score.
+
+Use consistent reasoning criteria across evaluations.
+
+Query: {user_query}
+
+Document:
+  Title: {title}
+  Abstract: {abstract}
+
+Score: [Your score between 0 and 1]
+Reasoning: [Justification of the score, considering query intent, concept alignment, and document content]
+"""
+
+evaluation_prompt = """
+You are a professional academic writing assistant. Please evaluate the similarity between the user’s content and the article content, and provide a relevance score between 0 and 1.
+
+### **Input_format**
+Question: A raw academic search query  provided by the user.
+Article:
+    - Title: Title of the academic article
+    - Author: All authors of the academic article
+    - Year: Publication date of the academic article
+    - Abstract: Abstract of the academic article, explaining and summarizing the content
+
+---
+### **Evaluation Criteria & Scoring (0-1 Scale):**
+- Topic Match: Does the document explicitly address the subject of the query? Consider keyword overlap, research area similarity, and alignment with the core theme of the query.
+- Contextual Relevance: Does the document explore the specific intent or implicit aspects of the query?
+- Depth & Completeness: Does the document provide in-depth analysis, experimental results, or theoretical discussions that comprehensively address the query topic?
+**Score Ranges:**
+0.0 - 0.09: Completely unrelated. The document does not address the core content of the question at all, or it completely deviates from the topic.
+0.1 - 0.49: Very low relevance. The document addresses a very limited aspect of the topic or is mostly irrelevant, containing only minor parts that may be loosely connected.
+0.4 - 0.59: Low relevance. The document contains some relevant content but fails to fully answer the question, or some information is incorrect or incomplete.
+0.6 - 0.79: Moderate relevance. The document covers the main aspects of the question but lacks certain details or depth, or there may be some deviations in the content.
+0.8 - 0.99: High relevance. The document broadly covers the key points of the question, is mostly accurate and complete, but may lack minor details or have slight deviations.
+1: Perfect relevance. The document completely and accurately answers the question, covering all core aspects with complete information and no deviations.
+---
+### **Note:**
+- Provide only a numerical score without analysis.
+- Ensure the score precision is up to two decimal places.
+- Do not provide vague or overly broad scores. Ensure the score directly reflects the content’s relevance.
+---
+### **Example:**
+Question: What are the latest methods for enhancing the clarity and realism of image generation models?
+Article:
+    - Title: "Progressive Knowledge Distillation of Stable Diffusion XL Using Layer-Level Loss"
+    - Author: "Gupta, Yatharth; Jaddipal, Vishnu V.; Prabhala, Harish; Paul, Sayak; Von Platen, Patrick"
+    - Year: "2024"
+    - Abstract:
+    - "Stable Diffusion XL (SDXL) has become the best open-source text-to-image model (T2I) for its versatility and top-notch image quality. Efficiently addressing the computational demands of SDXL models is crucial for wider reach and applicability. In this work, we introduce two scaled-down variants, Segmind Stable Diffusion (SSD-1B) and Segmind-Vega, with 1.3B and 0.74B parameter UNets, respectively, achieved through progressive removal using layer-level losses focusing on reducing the model size while preserving generative quality. We release these model weights at https://hf.co/Segmind. Our methodology involves the elimination of residual networks and transformer blocks from the U-Net structure of SDXL, resulting in significant reductions in parameters, and latency. Our compact models effectively emulate the original SDXL by capitalizing on transferred knowledge, achieving competitive results against larger multi-billion parameter SDXL. Our work underscores the efficacy of knowledge distillation coupled with layer-level losses in reducing model size while preserving the high-quality generative capabilities of SDXL, thus facilitating more accessible deployment in resource-constrained environments."
+
+Output: 0.82
+---
+
+### **Input Data:**
+Question: "{query}"
+Article:
+    - Title: "{title}"
+    - Author: "{author}"
+    - Year: "{year}"
+    - Abstract: "{abstract}"
+Please evaluate the similarity based on the criteria above and output a score between 0 and 1, indicating the relevance of the answer to the question.
+
+**Output:**"""
+
+
+template_eval_evoled = """You are a rigorous and highly discerning academic search relevance evaluator. Your task is to critically assess the relationship between the user's query and the provided scholarly article. Apply a strict, high-standard academic lens to evaluate conceptual alignment, topical focus, and methodological relevance. Be skeptical of superficial keyword matches or loosely related themes. Only assign a high relevance score (on a 0–1 scale) when there is clear and substantial alignment in research purpose, methods, and contribution. Err on the side of conservatism in scoring—precision and selectivity are paramount.
+
+### **Input Format**
+Query: Raw academic search query
+Article:
+    - Title: Academic article title
+    - Abstract: Abstract text summarizing the paper's content
+
+---
+### **Hierarchical Evaluation Protocol**
+
+**1. Critical Relevance Check (Binary Gate)**
+- If the document contains ZERO of the following, automatically score 0.0:
+  - Core subject keywords from query
+  - Matching research domain
+  - Thematic alignment with query intent
+
+**2. Detailed Scoring Criteria** *(Only if passes Critical Check)*
+
+A. **Core Topic Alignment (0-0.6)**
+- 0.5-0.6: Directly addresses primary subject with matching terminology
+- 0.3-0.4: Related subfield but different focus area
+- 0.1-0.2: Only tangential connection through peripheral terms
+- 0.0: Fails Critical Relevance Check
+
+B. **Contextual Precision (0-0.3)**
+- 0.2-0.3: Explicitly addresses query's specific technical aspects
+- 0.1: General thematic similarity without concrete details
+- 0.0: No meaningful connection to query intent
+
+C. **Depth Validation (0-0.1)**
+- 0.1: Provides experimental validation/novel theoretical framework
+- 0.05: Mentions concept without substantive analysis
+- 0.0: Superficial treatment of subject
+
+---
+### **Scoring Matrix** *(Sum Components A+B+C)*
+0.00-0.19: Completely irrelevant/off-topic
+0.20-0.39: Minimal relevance - shares domain but different focus
+0.40-0.59: Partial relevance - addresses some aspects
+0.60-0.79: Substantial relevance - covers key elements
+0.80-1.00: Optimal match - comprehensive coverage
+
+---
+### **Anti-Gaming Rules**
+- Penalize -0.3 for keyword stuffing without contextual relevance
+- Penalize -0.2 for misleading titles/abstracts
+- If score <0.4, round down to nearest 0.1
+- If score ≥0.7, require positive marks in all 3 criteria
+
+---
+### **Examples**
+
+**Example 1 (Low Score)**
+Query: "Machine learning for early Alzheimer's diagnosis using MRI"
+Article: "Statistical analysis of MRI machine calibration errors"
+Reasoning: Fails Critical Relevance - no ML or Alzheimer's content
+Score: 0.15
+
+**Example 2 (High Score)**
+Query: "Federated learning optimization in IoT networks"
+Article: "Adaptive Gradient Compression for Energy-Efficient Federated Learning in Edge Computing Environments"
+Reasoning: Directly addresses FL optimization (0.6) + technical specifics (0.25) + experimental validation (0.1)
+Score: 0.86
+
+
+---
+### **Input Data**
+Query: {query}
+Article: {doc}
+
+---
+### **Output format:**
+**Reasoning:** [Concise technical justification]
+**Score:** [0.00-1.00]
+---
+"""

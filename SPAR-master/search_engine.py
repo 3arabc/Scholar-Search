@@ -195,7 +195,7 @@ class MultiSearchAgent:
         """Execute OpenAlex search."""
         logger.info(f"Searching OpenAlex for '{keyword}'")
         try:
-            papers = search_paper_via_query_from_openalex(keyword, per_page=50)  #wsl-77
+            papers = search_paper_via_query_from_openalex(keyword, per_page=30)  #wsl-77
             logger.info(f"Found {len(papers)} papers for '{keyword}' from OpenAlex")
             return SearchResult(
                 source="openalex", papers=papers, keyword=keyword, raw_query=raw_query
@@ -410,33 +410,81 @@ class MultiSearchAgent:
                                 else:
                                     logger.info(f"Keyword '{one}' already exists in source keywords for {source}")
 
-                            # ---- 新组合逻辑 ----
-                            # 1. 从原始查询中提取核心词（去掉常见停用词，保留有意义的词）
-                            # 简单分词并过滤停用词（这里可以用与之前 extract_keywords 相同的停用词列表）
-                            from global_config import STOPWORDS  # 假设有定义，或直接硬编码
+                            # ---- 新组合逻辑：生成多个不同长度的组合（2词、3词、4词...最多5词） ----
+                            # 1. 从原始查询中提取核心词（去掉常见停用词）
+                            STOPWORDS = {
+                                "what", "is", "are", "was", "were", "the", "a", "an", "of", "for", "on", "at", "to",
+                                "in", "with", "without",
+                                "by", "and", "or", "but", "from", "up", "about", "into", "through", "during",
+                                "including", "etc",
+                                "papers", "studies", "work", "research", "contribute", "advancement", "which", "how",
+                                "why", "when", "where",
+                                "can", "could", "would", "should", "might", "may", "does", "do", "is", "are", "has",
+                                "have", "been", "being"
+                            }
                             original_words = [w for w in query.lower().split() if w not in STOPWORDS and len(w) > 2]
-                            # 如果原始查询没有核心词（例如太短），则保留整个 query
                             if not original_words:
-                                original_words = [query]
+                                original_words = [query.strip()]
 
-                            # 2. 过滤扩展关键词：去除与原始查询核心词完全相同的词（避免重复）
-                            filtered_keywords = [kw for kw in source_keywords_valid if
-                                                 kw.lower() not in [w.lower() for w in original_words]]
+                            # 2. 合并候选词（原始核心词 + 扩展词），去重，保持原始顺序（先原始词后扩展词）
+                            candidate_set = set()
+                            candidate_list_ordered = []
+                            # 先加入原始核心词（保护）
+                            for w in original_words:
+                                if w not in candidate_set:
+                                    candidate_set.add(w)
+                                    candidate_list_ordered.append(w)
 
-                            # 3. 从过滤后的扩展词中取前 N 个（例如 3 个），组成组合查询
-                            # 组合查询格式：原始查询 + 选中的扩展词（空格分隔）
-                            # 注意：若过滤后扩展词不足，可以少取
-                            selected = filtered_keywords[:KEYWORDS_COMBINE_NUM]
-                            if selected:
-                                combined_query = query + " " + " ".join(selected)
+                            # 再加入扩展词，但检查是否与已有词有包含关系（忽略大小写）
+                            for w in source_keywords_valid:
+                                if w in candidate_set:
+                                    continue
+                                # 检查是否存在包含关系
+                                conflict = False
+                                for existing in candidate_list_ordered:
+                                    if existing.lower() in w.lower() or w.lower() in existing.lower():
+                                        conflict = True
+                                        break
+                                if not conflict:
+                                    candidate_set.add(w)
+                                    candidate_list_ordered.append(w)
+
+                            # 3. 如果没有候选词，回退到原始查询
+                            if not candidate_list_ordered:
+                                combined_queries = [query]
                             else:
-                                # 若所有扩展词都与原始词重复，则仅使用原始查询
-                                combined_query = query
+                                # 按长度降序排序（优先选择较长的具体词），用于贪心选择
+                                candidates_sorted = sorted(candidate_list_ordered, key=lambda x: len(x), reverse=True)
 
-                            # 存储为列表（只有一个组合查询）
-                            query_keywords_by_source[source][query] = [combined_query]
-                            keywords_combine_query[source][query] = combined_query
-                            query_keywords2raw[source][combined_query] = query
+                                # 预先准备：如果候选词少于2个，只生成一个单次查询
+                                if len(candidates_sorted) < 2:
+                                    combined_queries = [" ".join(candidates_sorted)]
+                                else:
+                                    # 按长度降序，取前 N 个最具体的词
+                                    candidates_sorted = sorted(candidate_list_ordered, key=lambda x: len(x),
+                                                               reverse=True)
+                                    combined_queries = []
+                                    # 2词
+                                    if len(candidates_sorted) >= 2:
+                                        combined_queries.append(" ".join(candidates_sorted[:2]))
+                                    # 3词
+                                    if len(candidates_sorted) >= 3:
+                                        combined_queries.append(" ".join(candidates_sorted[:3]))
+                                    # 如果没有任何组合（例如只有一个词），单独使用该词
+                                    if not combined_queries:
+                                        combined_queries = [" ".join(candidates_sorted)]
+                                    # 如果没有任何组合（例如候选词少于2个），回退到至少一个查询
+                                    if not combined_queries:
+                                        combined_queries = [" ".join(candidates_sorted[:2])] if len(
+                                            candidates_sorted) >= 2 else [" ".join(candidates_sorted)]
+
+                            # 存储为列表（每个元素是一个组合查询字符串）
+                            query_keywords_by_source[source][query] = combined_queries
+                            # 为每个组合建立到原始查询的映射
+                            for cq in combined_queries:
+                                query_keywords2raw[source][cq] = query
+                            # 保留 keywords_combine_query（原逻辑中用|连接，现保留为第一个组合或原始）
+                            keywords_combine_query[source][query] = combined_queries[0] if combined_queries else query
                             logger.info(
                                 f"Query {query_idx+1}: Got {len(source_keywords_valid)} keywords for {source}"
                             )
@@ -668,7 +716,107 @@ def similarity_code_v4(query, doc, search_time):
     except:
         logger.error(f"similarity_code_v4 error {traceback.format_exc()}")
         return {}
+def llm_is_relevant(query: str, doc: Dict) -> tuple[bool, float]:
+    """
+    使用 LLM 判断论文是否直接回答查询，返回 (是否相关, 置信度得分0-1)
+    """
+    prompt = f"""你是一位严格的学术评审专家。请判断以下论文是否**直接回答了**用户的问题。
 
+用户问题：{query}
+
+论文标题：{doc.get('title', '')}
+论文摘要：{doc.get('abstract', '')}
+
+请只输出一个 JSON 对象，格式为：{{"relevant": true/false, "confidence": 0.0-1.0}}
+其中 confidence 表示你有多确定（0.8以上表示非常确定）。
+"""
+    for _ in range(2):  # 重试2次
+        try:
+            response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
+            response = fetch_string(response)
+            result = extract_json(response)
+            if result and "relevant" in result:
+                return result["relevant"], result.get("confidence", 0.5)
+        except:
+            continue
+    return False, 0.0  # 默认不相关
+def llm_relevance_score(query: str, doc: Dict) -> float:
+    prompt = f"""你是一位严格的学术评审专家。请评估以下论文与用户查询的相关性，给出 0-1 之间的分数（精确到两位小数）。
+
+用户查询：{query}
+
+论文信息：
+- 标题：{doc.get('title', '')}
+- 摘要：{doc.get('abstract', '')}
+- 出版年份：{doc.get('publicationYear', '未知')}
+- 引用数：{doc.get('citationCount', 0)}
+
+**评分核心依据**：
+- 标题是否直接包含查询中的关键词或核心概念（权重最高）。
+- 摘要是否明确回答了查询所提的问题或涉及相关研究方法/应用。
+- 如果标题或摘要与查询无关，即使年份新、引用高，也应评为低分（<0.5）。
+- 年份和引用数仅作为辅助参考，不能单独提升评分。
+
+评分区间：
+- 0.90-1.00：标题和摘要都高度相关，直接解答查询。
+- 0.70-0.89：标题或摘要相关，但略有偏差或深度不足。
+- 0.50-0.69：部分相关，但主题偏离或只涉及边缘内容。
+- 0.00-0.49：标题和摘要均与查询无关。
+
+**请仅输出一个数字分数（如 0.85），不要附带任何文字解释。**
+"""
+    for attempt in range(LLM_TRY_COUNT):
+        try:
+            response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
+            # 提取分数（支持多种格式）
+            match = re.search(r'(\d+\.\d+|\d+)', response.strip())
+            if match:
+                score = float(match.group(1))
+                # 确保在 0-1 范围内
+                return max(0.0, min(1.0, score))
+            else:
+                logger.warning(f"LLM returned no numeric score: {response}")
+        except Exception as e:
+            logger.error(f"LLM relevance scoring failed: {e}")
+            time.sleep(SLEEP_TIME_LLM)
+    # 如果多次失败，返回原始 sim_score（fallback）
+    return doc.get('sim_score', 0.0)
+def llm_is_relevant_strict(query: str, doc: Dict) -> tuple[bool, float]:
+    """
+    使用 LLM 严格判断论文是否直接回答用户的原始问题。
+    返回 (是否相关, 置信度分数 0-1)。
+    置信度 >= 0.7 才视为相关。
+    """
+    prompt = f"""你是一位严格的学术评审专家。你的任务是判断以下论文是否**直接回答了**用户提出的原始问题。
+
+用户原始问题：{query}
+
+论文标题：{doc.get('title', '')}
+论文摘要：{doc.get('abstract', '')}
+
+请根据论文的标题和摘要内容，判断这篇论文是否直接针对用户问题提供了答案、解决方案、证据或深入分析。
+
+**判断标准**：
+- 如果论文的核心内容与问题直接相关，且明显是在解决该问题，则判定为“相关”。
+- 如果论文仅泛泛提及相关领域，或只涉及问题的某个边缘方面，则判定为“不相关”。
+- 只有明确、直接的回应才算相关。
+
+请只输出一个 JSON 对象，格式为：
+{{"relevant": true/false, "confidence": 0.0-1.0}}
+其中 confidence 表示你对判断的把握程度（0.8 以上表示非常确定）。
+"""
+    for _ in range(2):
+        try:
+            response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
+            response = fetch_string(response)
+            result = extract_json(response)
+            if result and "relevant" in result:
+                return result["relevant"], result.get("confidence", 0.5)
+        except Exception as e:
+            logger.warning(f"LLM strict validation failed: {e}")
+            continue
+    return False, 0.0  # 默认不相关
+'''
 def llm_relevance_score(query: str, doc: Dict) -> float:  #wsl-73 二次筛选
     """
     使用 LLM 对单篇论文进行相关性评分，返回 0-1 之间的分数。
@@ -711,6 +859,7 @@ def llm_relevance_score(query: str, doc: Dict) -> float:  #wsl-73 二次筛选
             time.sleep(SLEEP_TIME_LLM)
     # 如果多次失败，返回原始 sim_score（fallback）
     return doc.get('sim_score', 0.0)
+'''
 
 def batch_llm_relevance_filter(query: str, docs: list, top_n: int = 25, batch_size: int = 12) -> list:
     """
@@ -848,6 +997,23 @@ class AcademicTreeSearchEngine:
         self._selector = None  # 用于存储懒加载的实例
         self.max_docs = max_docs  # 用于控制返回数量
 
+    #wsl-8.12 使用 BAAI/bge-reranker-v2-m3 进行重排序
+    @property
+    def reranker_model(self):
+        if not hasattr(self, '_reranker'):
+            self._reranker = FlagReranker('BAAI/bge-reranker-v2-m3', use_fp16=True)
+        return self._reranker
+
+    def rerank_with_cross_encoder(self, query, docs, top_k=100):
+        """使用交叉编码器重排序"""
+        if not docs:
+            return []
+        pairs = [[query, doc.get('title', '') + ' ' + doc.get('abstract', '')] for doc in docs]
+        scores = self.reranker_model.compute_score(pairs, normalize=True)
+        for doc, score in zip(docs, scores):
+            doc['rerank_score'] = score
+        docs.sort(key=lambda x: x.get('rerank_score', 0), reverse=True)
+        return docs[:top_k]
     @property
     def emd_model(self):
         if self._emd_model is None:
@@ -1272,7 +1438,19 @@ class AcademicTreeSearchEngine:
             current_year = datetime.now().year
             previous_year = current_year - 1
 
-            # wsl-76 根据查询分析选择合适的模板
+            # wsl-8.5------ 使用意图增强的扩展模板 -----
+            logger.info(f"Using intent-aware query expansion for: {query}")
+            # 构建包含意图和领域的提示
+            intent_aware_prompt = f"""
+            You are an expert in academic search. The user's query is: "{query}".
+            The identified research intent is: "{intent}".
+            The domain is: "{domain}".
+            Generate exactly 3 concise search queries (3-8 words each) that are directly relevant to this intent and domain.
+            Avoid broad or generic terms. Output as a JSON list.
+            """
+            prompt = intent_aware_prompt
+            prompt_type = "intent_aware"
+            '''
             # Determine the appropriate template based on query analysis
             if FUSION_TEMPLATE == "AUTOMATIC" and  self._is_survey_focused(intent):
                 # For survey-focused queries, prioritize finding comprehensive reviews
@@ -1411,6 +1589,14 @@ class AcademicTreeSearchEngine:
                 logger.info(
                     f"Using best response from {LLM_TRY_COUNT} attempts: {len(best_response)} queries"
                 )
+                # 生成变体查询并合并
+                variant_queries = self._generate_variant_queries(query, num_variants=3)
+                for v in variant_queries:
+                    if v not in best_response:
+                        best_response.append(v)
+                logger.info(
+                    f"Using best response with variants: {len(best_response)} queries"
+                )
                 return best_response
 
             # Fallback to basic expansion if all attempts fail
@@ -1423,6 +1609,11 @@ class AcademicTreeSearchEngine:
             if phrase_query not in fallback_queries:
                 fallback_queries.append(phrase_query)
                 logger.info(f"Added forced phrase query to fallback: {phrase_query}")
+            # 生成变体查询并合并
+            variant_queries = self._generate_variant_queries(query, num_variants=3)
+            for v in variant_queries:
+                if v not in fallback_queries:
+                    fallback_queries.append(v)
             return fallback_queries
 
         except Exception as e:
@@ -1495,7 +1686,27 @@ class AcademicTreeSearchEngine:
             f"recent advances in {query}",
             f"{domain} {query} methodologies",
         ]
-
+    #wsl-8.5
+    def _generate_variant_queries(self, query: str, num_variants: int = 2) -> List[str]:
+        """使用 LLM 生成查询的多个变体，用于增加召回"""
+        try:
+            from instruction import template_query_variants
+            prompt = template_query_variants.format(
+                user_query=query,
+                num_variants=num_variants
+            )
+            response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
+            response = fetch_string(response)
+            variants = extract_json(response)
+            if isinstance(variants, list):
+                # 过滤空字符串，并确保每个变体不为空
+                return [v.strip() for v in variants if v and v.strip()]
+            else:
+                logger.warning(f"Variant generation returned non-list: {variants}")
+                return []
+        except Exception as e:
+            logger.warning(f"Variant generation failed: {e}")
+            return []
     def _generate_emergency_fallback_queries(self, query):
         """
         Generate emergency fallback queries when all else fails.
@@ -1747,9 +1958,12 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
         ]
         '''
         golden_paper_info = [
-            "Title:{}\nAbstract:{}".format(
+            "Title: {}\nTitle: {}\nTitle: {}\nAbstract: {}".format(
                 doc.get("title", ""),
-                doc.get("abstract", ""),
+                doc.get("title", ""),
+                doc.get("title", ""),
+                doc.get("abstract", "")
+                # 不再包含作者、年份、领域，以免干扰
             )
             for doc in docs
         ]
@@ -1805,10 +2019,13 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
         docs = [doc for doc in docs if doc.get("title", "") and doc.get("abstract", "")]
 
         golden_paper_info = [
-            prompt_template.format(
-                title=paper.get("title", ""),
-                abstract=paper.get("abstract", ""),
-                user_query=query,
+            "Title: {}\nTitle: {}\nAbstract: {}\nAuthors: {}\nYear: {}\nFields: {}".format(
+                doc.get("title", ""),
+                doc.get("title", ""),  # 重复标题
+                doc.get("abstract", ""),
+                "; ".join([a.get("name", "") for a in doc.get("authors", [])]),
+                doc.get("publicationYear", ""),
+                doc.get("fieldsOfStudy", "")
             )
             for paper in docs
         ]
