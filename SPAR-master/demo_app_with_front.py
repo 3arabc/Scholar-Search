@@ -47,6 +47,21 @@ class SearchRequest(BaseModel):
     filter_min_citations: Optional[int] = None
     filter_fields: Optional[List[str]] = []
     sort_by: Optional[str] = 'year'  # 可选值: 'year', 'citations', 'similarity'
+    selected_queries: Optional[List[str]] = None  # 用户选中的 arXiv 查询子集
+    selected_keywords: Optional[List[str]] = None  # 用户选中的 OpenAlex 关键词
+    expanded_queries: Optional[List[str]] = None  # 预览阶段生成的完整扩展查询列表
+
+# 预览请求/响应模型
+class PreviewRequest(BaseModel):
+    queries: List[str]
+
+class PreviewResponse(BaseModel):
+    status: str
+    expanded_queries: Dict[str, List[str]]  # original_query -> [expanded queries]
+    extracted_keywords: List[str]  # OpenAlex 关键词
+    suitable_sources: List[str]
+    query_intent: Optional[str] = ""
+    domain: Optional[str] = ""
 
 # 响应模型
 class SearchResponse(BaseModel):
@@ -56,7 +71,8 @@ class SearchResponse(BaseModel):
     all_papers: Dict[str, Dict[str, Any]]
     query_source_map: Dict[str, str]
     search_tree: Optional[Dict[str, Any]] = None  # 搜索树结构（高级搜索模式）
-    valid_papers: Optional[int] = 0  # 新增
+    valid_papers: Optional[int] = 0  # 有效论文数
+    category_taxonomy: Optional[Dict[str, Dict[str, List[str]]]] = None  # 分类体系
 
 # 初始化搜索引擎
 multi_search_agent = MultiSearchAgent()
@@ -117,6 +133,70 @@ async def read_root():
 async def health_check():
     """健康检查接口"""
     return {"status": "healthy", "message": "Scholar Paper Search API is running"}
+
+
+@app.post("/search/preview", response_model=PreviewResponse)
+async def preview_search(request: PreviewRequest):
+    """
+    预览搜索：只运行查询扩展和关键词提取，不执行实际搜索。
+    返回扩展查询（用于arXiv）和提取的关键词（用于OpenAlex），
+    供前端展示给用户选择。
+    """
+    try:
+        from search_engine import AcademicTreeSearchEngine
+        engine = AcademicTreeSearchEngine()
+        multi_agent = MultiSearchAgent()
+
+        all_expanded = {}
+        all_keywords_set: set = set()
+        sources = ["arxiv", "openalex"]
+        intent = ""
+        domain = ""
+
+        for query in request.queries:
+            logger.info(f"Preview: expanding query '{query}'")
+            # 1. 运行 LLM 查询扩展
+            result = engine.expand_query(query)
+            expanded = result.get("expanded_queries", [])
+            if query not in expanded:
+                expanded = [query] + expanded
+            all_expanded[query] = expanded
+
+            # 收集意图信息
+            if result.get("suitable_sources"):
+                sources = result["suitable_sources"]
+            if result.get("query_intent"):
+                intent = result["query_intent"]
+            if result.get("domain"):
+                domain = result["domain"]
+
+            # 2. 对每个扩展查询提取 OpenAlex 关键词（expanded 已包含原始查询）
+            try:
+                for eq in expanded:
+                    eq_keywords = multi_agent.extract_keywords(eq, "openalex", max_keywords=4)
+                    for kw in eq_keywords:
+                        all_keywords_set.add(kw)
+            except Exception as ke:
+                logger.error(f"Keyword extraction failed for '{query}': {ke}")
+
+        return PreviewResponse(
+            status="success",
+            expanded_queries=all_expanded,
+            extracted_keywords=sorted(all_keywords_set),
+            suitable_sources=sources,
+            query_intent=intent,
+            domain=domain,
+        )
+    except Exception:
+        logger.error(f"Preview search failed: {traceback.format_exc()}")
+        return PreviewResponse(
+            status="error",
+            expanded_queries={},
+            extracted_keywords=[],
+            suitable_sources=[],
+            query_intent="",
+            domain="",
+        )
 
 @app.post("/search", response_model=SearchResponse)
 async def search_papers(request: SearchRequest):
@@ -463,6 +543,178 @@ def process_paper_collection(papers_data, source='unknown', is_dict_format=True,
     return papers_list, papers_dict
 
 
+def build_category_taxonomy(raw: Dict) -> Dict[str, Dict[str, List[str]]]:
+    """
+    按照检索时使用的查询/关键词对论文进行分类，按来源分组。
+
+    支持两种输入结构：
+    1. 已分组结构（来自 collect_tree_queries）：
+       {"arxiv": {"query1": ["id1", ...]}, "openalex": {"keyword1": ["id2", ...]}}
+    2. 平面结构（来自简单搜索的 query_results）：
+       {"query1": [paper_dict, ...], "keyword1|keyword2": [paper_dict, ...]}
+
+    会自动将 `|` 连接的复合关键词拆分为独立分类项。
+
+    Returns:
+        {
+            "arxiv": {"query1": ["id1"], ...},
+            "openalex": {"keyword1": ["id2"], ...},
+            ...
+        }
+    """
+    taxonomy: Dict[str, Dict[str, List[str]]] = {}
+
+    # 判断输入结构：已分组还是平面
+    first_val = next(iter(raw.values()), None)
+    if isinstance(first_val, dict):
+        # 已按来源分组的结构（来自 collect_tree_queries）
+        grouped_input = raw
+    else:
+        # 平面结构（来自 query_results），放入 "queries" 组
+        grouped_input = {"queries": raw}
+
+    for group, queries in grouped_input.items():
+        if group not in taxonomy:
+            taxonomy[group] = {}
+
+        expanded: Dict[str, List[str]] = {}
+        for q, ids_or_papers in queries.items():
+            # 提取论文ID（支持 [paper_dict, ...] 和 [id_str, ...] 两种格式）
+            ids: List[str] = []
+            for item in (ids_or_papers if isinstance(ids_or_papers, (list, tuple)) else []):
+                if isinstance(item, dict):
+                    pid = item.get('paper_id')
+                    if pid:
+                        ids.append(pid)
+                elif isinstance(item, str):
+                    ids.append(item)
+            if not ids:
+                continue
+            # 去重
+            ids = list(dict.fromkeys(ids))
+
+            # 拆分 | 连接的复合关键词
+            if '|' in q:
+                parts = [p.strip() for p in q.split('|') if p.strip()]
+                for part in parts:
+                    if part in expanded:
+                        expanded[part].extend(ids)
+                    else:
+                        expanded[part] = ids.copy()
+            else:
+                if q in expanded:
+                    expanded[q].extend(ids)
+                else:
+                    expanded[q] = ids
+
+        # 最终去重 + 按论文数降序排列
+        for q, ids in expanded.items():
+            expanded[q] = list(dict.fromkeys(ids))
+        taxonomy[group] = dict(sorted(expanded.items(), key=lambda x: len(x[1]), reverse=True))
+
+    return taxonomy
+
+
+def collect_tree_queries(root, valid_ids: set) -> Dict[str, Dict[str, List[str]]]:
+    """
+    递归遍历搜索树，从每个节点中提取来源→查询→论文ID的映射。
+
+    根据节点的 source 字段区分查询来源：
+    - "arxiv" → arXiv 查询
+    - "openalex" → OpenAlex 关键词
+    - 其他 → 其他
+
+    Args:
+        root: SearchNode 根节点
+        valid_ids: 有效的 paper_id 集合
+
+    Returns:
+        {"arxiv": {"query1": ["id1", "id2"], ...}, "openalex": {"keyword1": [...]}, ...}
+    """
+    result: Dict[str, Dict[str, List[str]]] = {}
+
+    def _get_source_group(node_source) -> str:
+        """根据节点 source 字段判断归属分组"""
+        if isinstance(node_source, str):
+            sl = node_source.lower()
+            if 'arxiv' in sl:
+                return 'arxiv'
+            elif 'openalex' in sl:
+                return 'openalex'
+            elif 'pubmed' in sl:
+                return 'pubmed'
+        elif isinstance(node_source, (list, tuple)):
+            for s in node_source:
+                g = _get_source_group(s)
+                if g != 'other':
+                    return g
+        return 'other'
+
+    def _collect_pids(doc_list):
+        """从文档列表中提取有效的 paper_id"""
+        pids = []
+        for doc in doc_list:
+            if not isinstance(doc, dict):
+                continue
+            pid = doc.get('paper_id') or doc.get('arxivId')
+            if pid and pid in valid_ids:
+                pids.append(pid)
+        return pids
+
+    def _add_to_result(node, pids):
+        """将 paper_ids 按节点来源加入分类结果"""
+        if not pids:
+            return
+        group = _get_source_group(node.source)
+        if group not in result:
+            result[group] = {}
+        key = node.query_str
+        if key in result[group]:
+            result[group][key].extend(pids)
+        else:
+            result[group][key] = pids
+
+    covered_ids = set()
+
+    def _traverse(node):
+        if node.query_str:
+            # 从相关论文收集
+            if node.docs:
+                pids = _collect_pids(node.docs)
+                _add_to_result(node, pids)
+                covered_ids.update(pids)
+            # 从不相关论文收集（这些论文也经过了评分，有 sim_score）
+            if node.irrelevant_docs:
+                pids = _collect_pids(node.irrelevant_docs)
+                _add_to_result(node, pids)
+                covered_ids.update(pids)
+            # 从引用探索结果收集
+            if hasattr(node, 'relevance_refs') and node.relevance_refs:
+                pids = _collect_pids(node.relevance_refs)
+                _add_to_result(node, pids)
+                covered_ids.update(pids)
+            # 从参考文献收集
+            if hasattr(node, 'references') and node.references:
+                pids = _collect_pids(node.references)
+                _add_to_result(node, pids)
+                covered_ids.update(pids)
+        for child in node.children:
+            _traverse(child)
+
+    _traverse(root)
+
+    # 收集未覆盖的有效论文（来自引用探索、深度搜索等未入节点文档池的论文）
+    uncovered = valid_ids - covered_ids
+    if uncovered:
+        result['other'] = {'未分类': list(uncovered)}
+
+    # 去重（每个组内的每个查询的论文ID去重）
+    for group, queries in result.items():
+        for q, ids in queries.items():
+            result[group][q] = list(dict.fromkeys(ids))
+    return result
+
+
 async def _advanced_search(request: SearchRequest, filter_config: dict = None, sort_by: str = 'year') -> SearchResponse:
     """
     高级搜索模式，使用AcademicSearchTree进行完整的搜索流程
@@ -474,6 +726,7 @@ async def _advanced_search(request: SearchRequest, filter_config: dict = None, s
         all_papers = {}
         query_source_map = {}
         search_trees = {}
+        expanded_query_papers = {}  # 从搜索树中收集扩展查询→论文映射
 
         for query in request.queries:
             logger.info(f"Processing query with advanced search: {query}")
@@ -486,12 +739,15 @@ async def _advanced_search(request: SearchRequest, filter_config: dict = None, s
                     similarity_threshold=request.similarity_threshold
                 )
 
-                # 执行搜索（包含完整pipeline）
+                # 执行搜索（包含完整pipeline），支持查询筛选
                 sorted_docs = search_agent.search(
                     query,
                     end_date=request.end_date,
                     filter_params=filter_config,
-                    sort_by=sort_by
+                    sort_by=sort_by,
+                    selected_queries=request.selected_queries,
+                    expanded_queries=request.expanded_queries,
+                    selected_keywords=request.selected_keywords
                 )
 
                 if not sorted_docs:
@@ -523,6 +779,22 @@ async def _advanced_search(request: SearchRequest, filter_config: dict = None, s
                 except Exception as tree_error:
                     logger.error(f"Error converting search tree to dict: {str(tree_error)}")
 
+                # 从搜索树中提取扩展查询及对应论文
+                try:
+                    valid_ids = set(papers_dict.keys())
+                    if valid_ids and hasattr(search_agent, 'root') and search_agent.root:
+                        tree_queries = collect_tree_queries(search_agent.root, valid_ids)
+                        for group, queries in tree_queries.items():
+                            if group not in expanded_query_papers:
+                                expanded_query_papers[group] = {}
+                            for q, ids in queries.items():
+                                if q in expanded_query_papers[group]:
+                                    expanded_query_papers[group][q].extend(ids)
+                                else:
+                                    expanded_query_papers[group][q] = ids
+                except Exception as collect_error:
+                    logger.error(f"Error collecting tree queries: {str(collect_error)}")
+
             except Exception as query_error:
                 logger.error(f"Error processing query '{query}': {str(query_error)}")
                 logger.error(f"Query error traceback: {traceback.format_exc()}")
@@ -531,6 +803,7 @@ async def _advanced_search(request: SearchRequest, filter_config: dict = None, s
                 query_source_map[query] = "error"
 
         # 构造响应
+        category_taxonomy = build_category_taxonomy(expanded_query_papers if expanded_query_papers else all_results)
         response = SearchResponse(
             status="success",
             total_papers=len(all_papers),
@@ -538,7 +811,8 @@ async def _advanced_search(request: SearchRequest, filter_config: dict = None, s
             all_papers=all_papers,
             query_source_map=query_source_map,
             search_tree=search_trees,
-            valid_papers = sum(1 for p in all_papers.values() if p.get('is_valid', False))  # wsl-73
+            valid_papers=sum(1 for p in all_papers.values() if p.get('is_valid', False)),  # wsl-73
+            category_taxonomy=category_taxonomy
         )
         '''
         #wsl-76 ========== 🆕 只保留得分最高的 Top 5 ==========
@@ -623,6 +897,7 @@ async def _simple_search(request: SearchRequest, filter_config: dict = None) -> 
         _, standardized_all_papers = process_paper_collection(all_papers, 'simple_search', is_dict_format=True, filter_invalid=True)
 
         # 构造响应
+        category_taxonomy = build_category_taxonomy(standardized_query_results)
         response = SearchResponse(
             status="success",
             total_papers=len(standardized_all_papers),
@@ -630,7 +905,8 @@ async def _simple_search(request: SearchRequest, filter_config: dict = None) -> 
             all_papers=standardized_all_papers,
             query_source_map=query_source_map,
             search_tree=None,  # 简单搜索不生成搜索树
-            valid_papers=sum(1 for p in all_papers.values() if p.get('is_valid', False))  # wsl-73
+            valid_papers=sum(1 for p in all_papers.values() if p.get('is_valid', False)),  # wsl-73
+            category_taxonomy=category_taxonomy
         )
 
         logger.info(f"Simple search completed successfully. Found {len(standardized_all_papers)} papers")

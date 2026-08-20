@@ -18,28 +18,22 @@ DEBUG = False
 # =============================================================================
 '''
 API_KEY = os.getenv(
-    "SILICONFLOW_API_KEY",
-    "sk-uejssktdixvxpaorxeonyztxomulwlnxkqmnisonsiffepsn",
-)
-ENDPOINT = os.getenv(
-    "SILICONFLOW_BASE_URL",
-    "https://api.siliconflow.cn/v1/chat/completions",
-)
-'''
-API_KEY = os.getenv(
     "DEEPSEEK_API_KEY",
-    "sk-c049a5216e1244409378514aa687f95d",
+    "",
 )
 ENDPOINT = os.getenv(
     "DEEPSEEK_BASE_URL",
-    "https://api.deepseek.com/v1",
+    "https://api.deepseek.com/v1/chat/completions",
 )
-#DEPLOYMENT_NAME = "deepseek-ai/DeepSeek-V3.2"
+DEPLOYMENT_NAME = "deepseek-v4-flash"
 
 # =============================================================================
 # PIPELINE CONFIGURATION
 # =============================================================================
 
+# 二次筛选（已关闭：与第一阶段评分重复，且串行评分耗时巨大）
+ENABLE_LLM_RERANK = True        # 开启批量 LLM 精筛（wsl-84：分批并发，top 25 篇）
+LLM_RERANK_THRESHOLD = 0.7      # 保留分数阈值
 
 SAVE_ID2DOCS = True
 RELEVANCE_SCORE = 0.5
@@ -61,13 +55,11 @@ LENGTH_GEN_QUERY_FROM_CITATION = 12288
 TRY_COUNT = 4
 LLM_TRY_COUNT = 2  #wsl-74重试次数
 LLM_PARALLEL_NUM = 4
-#LLM_MODEL_NAME = "deepseek-ai/DeepSeek-V3.2"
-#LLM_MODEL_NAME = "Qwen3-8B"
-LLM_MODEL_NAME = "deepseek-chat"
+LLM_MODEL_NAME = "deepseek-v4-flash"
 
 
 API_TRY_COUNT = 4
-API_PARALLEL_REQUEST = 1
+API_PARALLEL_REQUEST = 4  # 提速优化：1→4，arxiv 批量获取并行
 
 SLEEP_TIME_LLM = 1.0 #wsl-74重试等待时间
 
@@ -78,12 +70,12 @@ DO_FUSION_JUDGE = True
 FUSION_TEMPLATE = "AUTOMATIC"  # Options: "WITHEXPLAIN", "AUTOMATIC"
 
 # Query processing settings
-QUERY_NUM_PRUNED = 8  # 每层保留的扩展查询数（增大以覆盖更多方向）
-RETRIEVAL_QUERY_BATCH_SIZE = 6  # Batch size for query processing to avoid excessive searching
+QUERY_NUM_PRUNED = 6  # 提速优化：8→6，每层保留的扩展查询数
+RETRIEVAL_QUERY_BATCH_SIZE = 12  # 提速优化：6→12，Batch size for query processing
 
 # Document processing settings
-DOCS_TO_EXPAND = 60  # 引用搜索的文档数（增大以覆盖更多引用）
-REFERENCE_DOC_PRUNED = 40  # 每篇文档提取的参考文献数
+DOCS_TO_EXPAND = 40  # 提速优化：60→40，引用搜索的文档数
+REFERENCE_DOC_PRUNED = 20  # 每篇文档提取的参考文献数
 REFERENCE_OCCUR_FREQUENCY = 0.6
 REFERENCE_DOC_NUM_TO_GEN_NEW_QUERY = 15  # 用于生成新查询的文档数（增大以丰富上下文）
 

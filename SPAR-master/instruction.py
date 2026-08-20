@@ -40,7 +40,7 @@ Extract optimal search keywords from the given research question, specifically o
 - Include chemical/drug names or biological processes where relevant
 
 ### Key Enhancement:
-- **Actively infer synonyms and related technical terms** that are commonly used in this field, even if they do not appear verbatim in the query. For example, if the query mentions "world model", also include "latent dynamics", "state-space model", "predictive model". Similarly, for any domain, use your knowledge of the field to add relevant alternatives.
+- **Only extract core technical terms that appear in or are directly implied by the query.** Do NOT add broad/generic terms (e.g., "machine learning", "deep learning", "natural language processing", "artificial intelligence") unless they are explicitly part of the query. Focus on specific model names, algorithm names, dataset names, and technical concepts directly relevant to the query.
 
 ### Examples by Source:
 - Semantic Scholar: [Start] transformer architecture, attention mechanism, language model fine-tuning[End]
@@ -147,40 +147,35 @@ Now, generate your response following the **Response Format** strictly:
 
 **Response:**"""
 
-template_query_fusion_survery_forcus = """You are an academic search expert specializing in COMPREHENSIVE REVIEWS and SURVEY PAPERS.
+template_query_fusion_survery_forcus = """You are an academic search expert. The user asks for SPECIFIC research papers on a topic; your queries will be used to RETRIEVE those exact papers.
 
 ### TASK:
-Generate {user_input_N} queries optimized for finding SURVEY and REVIEW PAPERS on this research topic:
+Generate {user_input_N} queries for academic search engines (arxiv, openalex) to retrieve the SPECIFIC papers the user is asking about:
 "{user_query}"
 
 ### REQUIREMENTS:
-1. Each query must EXPLICITLY target survey/review literature using terms like:
-   - "survey of..."
-   - "literature review..."
-   - "state-of-the-art in..."
-   - "systematic review..."
-   - "comparative analysis of..."
+1. **MANDATORY — PRESERVE CORE ENTITIES**: First identify ALL key technical terms, model names, algorithm names, dataset names and acronyms in the user query (e.g., "BERT", "GPT", "world models", "causal bandits", "target networks", "Deep Q-learning"). Keep them VERBATIM — every generated query MUST contain at least one of these core terms. NEVER replace them with broader categories like "neural networks" or "machine learning".
 
-2. Cover DISTINCT ASPECTS of the topic:
-   - Methods/approaches surveys
-   - Application domain surveys
-   - Historical development surveys
-   - Future directions/challenges
+2. **NO OFF-TOPIC DIRECTIONS**: Never introduce application domains, industries or sub-topics that are NOT mentioned in the user query. If the user asks which papers something is based on, generate queries that would retrieve those specific papers — not commentary about other applications.
 
-3. **Use synonyms and related technical terms** to broaden the search. For example, if the query refers to "world models", also consider "latent dynamics models", "state-space models", "predictive models", "Dreamer", "PlaNet", etc. Include these variations naturally within the queries.
+3. **QUERY STYLE MIX (most important)**: At most 1/4 of the queries may use "survey of..." / "literature review..." style phrasing. The remaining 3/4 MUST be SHORT keyword phrases that would retrieve PRIMARY research papers, phrased the way a paper TITLE would be written (e.g., "target networks deep Q-learning", "graph attention network anomaly detection", "BERT pre-training language model"). Prefer this style when the user asks for specific papers ("What papers...", "Which work...", "studies that...", "Could you... papers about...").
 
-4. **Time constraints**: DO NOT add any specific year or date range (e.g., "2020-2025") unless the user query explicitly mentions a specific year. For general terms like "recent" or "latest", do not convert them to explicit years – just keep them as "recent" or omit time indicators.
+4. **Use synonyms and related technical terms that would appear in the TITLES or ABSTRACTS of relevant papers** to broaden the search. For example, if the query refers to "world models", also consider "latent dynamics models", "state-space models", "predictive models", "Dreamer", "PlaNet", etc. Include these variations naturally within the queries.
 
-5. Keep queries CONCISE (5-15 words) and directly usable in academic search engines.
+5. **Time constraints**: DO NOT add any specific year or date range (e.g., "2020-2025") unless the user query explicitly mentions a specific year. For general terms like "recent" or "latest", do not convert them to explicit years – just keep them as "recent" or omit time indicators.
+
+6. Keep queries CONCISE (3-10 words) and directly usable in academic search engines. SHORT queries retrieve much better results.
+
+7. **WELL-FORMED**: Every query must be a complete, well-formed search phrase. NEVER output partial fragments of the original question (e.g., do not echo "...you some hybrid architectures reconstruction-based techniques").
 
 ### OUTPUT FORMAT:
 Return a JSON object with this exact structure:
 {{
   "expanded_queries": [
     {{
-      "query": "Survey of [specific aspect] in [topic area]",
-      "reason": "Targets comprehensive reviews of [specific aspect]",
-      "survey_type": "[methodological/application/historical/future]"
+      "query": "keyword phrase or survey phrase",
+      "reason": "1-sentence justification of what specific papers this targets",
+      "survey_type": "[keyword/survey]"
     }},
     ...additional queries...
   ]

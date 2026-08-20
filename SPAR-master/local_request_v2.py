@@ -118,21 +118,22 @@ MODEL_CONFIGS = {
             base_url="http://0.0.0.0:9094/v1",
         ),
     ),
-    "deepseek-chat": ModelConfig(
-        url="https://api.deepseek.com/v1/chat/completions",   # 实际请求时由 openai_client 的 base_url 覆盖
-        max_len=8192,  # DeepSeek 支持 64K 上下文，但设置合理长度
-        model_name="deepseek-chat",  # DeepSeek 官方模型名
+    "deepseek-v4-flash": ModelConfig(
+        url="https://api.deepseek.com/v1/chat/completions",  # DeepSeek 官方 API 直连
+        max_len=131072,
+        model_name="deepseek-v4-flash",
         think_bool=False,
         temperature=0.7,
         top_p=0.8,
         top_k=20,
         min_p=0,
-        timeout=120,  # 官方 API 响应通常较快
         openai_client=OpenAI(
-            api_key=os.getenv("DEEPSEEK_API_KEY"),  # 从环境变量读取
-            base_url="https://api.deepseek.com/v1",  # DeepSeek 官方 base_url
-            timeout=120.0,
-            max_retries=2,
+            api_key=os.getenv("DEEPSEEK_API_KEY", "your_api_key_here"),
+            base_url="https://api.deepseek.com/v1",
+            timeout=400.0,
+            max_retries=3,
+            # 如果需要代理，取消注释并修改端口
+            # http_client=httpx.Client(proxies="http://127.0.0.1:7890")
         ),
     ),
     "deepseek-ai/DeepSeek-V3.2": ModelConfig(
