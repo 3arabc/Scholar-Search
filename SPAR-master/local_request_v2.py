@@ -118,6 +118,24 @@ MODEL_CONFIGS = {
             base_url="http://0.0.0.0:9094/v1",
         ),
     ),
+    "deepseek-v4-flash": ModelConfig(
+        url="https://api.deepseek.com/v1/chat/completions",  # DeepSeek 官方 API 直连
+        max_len=131072,
+        model_name="deepseek-v4-flash",
+        think_bool=False,
+        temperature=0.7,
+        top_p=0.8,
+        top_k=20,
+        min_p=0,
+        openai_client=OpenAI(
+            api_key=os.getenv("DEEPSEEK_API_KEY", "your_api_key_here"),
+            base_url="https://api.deepseek.com/v1",
+            timeout=400.0,
+            max_retries=3,
+            # 如果需要代理，取消注释并修改端口
+            # http_client=httpx.Client(proxies="http://127.0.0.1:7890")
+        ),
+    ),
     "deepseek-ai/DeepSeek-V3.2": ModelConfig(
         url="https://api.siliconflow.cn/v1/chat/completions",  # 硅基流动的 API 地址
         max_len=131072,

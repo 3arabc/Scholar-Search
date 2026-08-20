@@ -28,18 +28,33 @@ class BGEM3EmbeddingAgent:
     def embed_query(self, text: str) -> List[float]:
         return self._get_embedding(text)
 
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        return [self._get_embedding(t) for t in texts]
+    def embed_documents(self, texts: List[str], batch_size: int = 32) -> List[List[float]]:
+        """
+        批量获取文本向量（每次请求多篇，减少 HTTP 往返）。
+        OpenAI 兼容接口支持 input 数组，返回的 data 按 index 排序对齐。
+        """
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        embeddings = []
+        for i in range(0, len(texts), batch_size):
+            batch = texts[i : i + batch_size]
+            payload = {"model": self.model, "input": batch}
+            response = requests.post(self.url, json=payload, headers=headers)
+            response.raise_for_status()
+            data = sorted(response.json()["data"], key=lambda d: d["index"])
+            embeddings.extend([d["embedding"] for d in data])
+        return embeddings
 
     def get_score(self, query: str, documents: List[str], **kwargs) -> List[float]:
         """
         计算 query 与每个 document 的余弦相似度。
-        这里 documents 是已拼接的字符串列表（由调用方生成），
-        但我们可以要求调用方传入结构化数据，或在内部重构。
-        为了最小改动，我们在调用方（search_engine.py）构造文本时优化。
+        query 单独一次请求，documents 批量请求（batch_size 可控，默认 32）。
         """
+        batch_size = kwargs.get("batch_size", 32)
         q_vec = np.array(self._get_embedding(query))
-        doc_vecs = [np.array(self._get_embedding(doc)) for doc in documents]
+        doc_vecs = [np.array(v) for v in self.embed_documents(documents, batch_size=batch_size)]
         scores = []
         for d_vec in doc_vecs:
             cos_sim = np.dot(q_vec, d_vec) / (np.linalg.norm(q_vec) * np.linalg.norm(d_vec))

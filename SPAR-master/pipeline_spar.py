@@ -12,7 +12,7 @@ from graphviz import Digraph
 from instruction import *
 from local_db_v2 import db_path, ArxivDatabase
 from log import logger
-from search_engine import AcademicTreeSearchEngine,llm_relevance_score
+from search_engine import AcademicTreeSearchEngine,llm_relevance_score,batch_llm_relevance_filter
 from search_node import SearchNode
 from typing import List, Dict, Optional
 import json
@@ -654,6 +654,9 @@ class AcademicSearchTree:
                         # Get document info from search state
                         doc_info = self.root.searched_docs.get(doc["paper_id"])
                         if not doc_info:
+                            # 回退到 cal_sim_docs（打分缓存，含全部候选文档）
+                            doc_info = self.root.cal_sim_docs.get(doc["paper_id"])
+                        if not doc_info:
                             logger.warning(
                                 f"Document info not found for {doc['paper_id']}"
                             )
@@ -685,6 +688,9 @@ class AcademicSearchTree:
                             for ref in refs
                             if ref.get("title") and ref.get("abstract")
                         ]
+                        # 裁剪每篇论文的引用数量（REFERENCE_DOC_PRUNED）
+                        if len(valid_refs) > REFERENCE_DOC_PRUNED:
+                            valid_refs = valid_refs[:REFERENCE_DOC_PRUNED]
 
                         ref_count += len(valid_refs)
                         doc_info["references"] = valid_refs
@@ -840,7 +846,7 @@ class AcademicSearchTree:
 
         return level_node, search_queue, query_node_relations
 
-    def search(self, initial_query: str, end_date="", filter_params: dict = None, sort_by: str = 'year', selected_queries: list = None, expanded_queries: list = None, selected_keywords: list = None) -> List:
+    def search(self, initial_query: str, end_date="", filter_params: dict = None, sort_by: str = 'similarity', selected_queries: list = None, expanded_queries: list = None, selected_keywords: list = None) -> List:
         """
         Main search method that:
         1. Initializes search tree with root query
@@ -1000,33 +1006,17 @@ class AcademicSearchTree:
                 f"Found {high_rel_count} highly relevant documents (score > {self.high_score_thresh})"
             )
 
-            # wsl-73二次筛选
+            # wsl-84 批量 LLM 精筛（替代旧版逐篇打分）
             if ENABLE_LLM_RERANK:
-                logger.info("Applying LLM fine-grained filtering on reranked top docs...")
-                # 获取重排序后的文档（如果存在）
-                reranked_docs = self.root.reranked_top_docs if self.root.reranked_top_docs else list(
-                    self.root.searched_docs.values())
-                # 只对前 TOP_FOR_LLM_FILTER 篇打分
-                TOP_FOR_LLM_FILTER = 50  # 可调
-                docs_to_filter = reranked_docs[:TOP_FOR_LLM_FILTER]
-                filtered_docs = {}
-                for doc in docs_to_filter:
-                    doc_id = doc.get("paper_id", "")
-                    if not doc_id:
-                        continue
-                    llm_score = llm_relevance_score(self.user_query, doc)
-                    doc['llm_score'] = llm_score
-                    # 降低阈值，避免误杀
-                    if llm_score >= 0.3:  # 调低阈值，宁可多留一些
-                        filtered_docs[doc_id] = doc
-                    else:
-                        logger.debug(f"Filtered doc {doc_id} with LLM score {llm_score:.2f}")
-                # 将未过滤的文档（超出TOP_FOR_LLM_FILTER的部分）也保留，但分数用原分数
-                for doc in reranked_docs[TOP_FOR_LLM_FILTER:]:
-                    doc_id = doc.get("paper_id", "")
-                    if doc_id and doc_id not in filtered_docs:
-                        filtered_docs[doc_id] = doc
-                self.root.searched_docs = filtered_docs
+                logger.info("Applying batch LLM fine-grained filtering...")
+                all_docs = list(self.root.searched_docs.values())
+                kept_docs = batch_llm_relevance_filter(self.user_query, all_docs, top_n=25)
+                kept_ids = {d.get("paper_id") for d in kept_docs if d.get("paper_id")}
+                self.root.searched_docs = {
+                    pid: doc for pid, doc in self.root.searched_docs.items()
+                    if pid in kept_ids
+                }
+                logger.info(f"[LLM精筛] searched_docs: {len(all_docs)} -> {len(self.root.searched_docs)}")
                 logger.info(f"After LLM filter: {len(filtered_docs)} documents kept")
             # wsl-710 ===== 新增：应用硬性过滤条件 =====
             if self.root.searched_docs:
