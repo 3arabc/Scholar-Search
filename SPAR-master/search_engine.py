@@ -83,7 +83,7 @@ class MultiSearchAgent:
         model_inp = template_extract_keywords_source_aware.format(
             user_query=query, source=source
         )
-        for _ in range(1):
+        for _ in range(4):
             try:
                 response = get_from_llm(model_inp, model_name=LLM_MODEL_NAME)
                 pattern = r"\[Start\](.*?)\[End\]"
@@ -94,9 +94,7 @@ class MultiSearchAgent:
                     return [kw.strip() for kw in keywords.split(",") if kw.strip()][:limit]
             except:
                 logger.error(f"Failed to extract keywords: {traceback.format_exc()}")
-        #return []
-        logger.warning(f"Keyword extraction failed, using original query as keyword: {query}") #wsl-72，无延申词可以使用原关键词搜索
-        return [query]
+        return []  # 提取失败返回空，避免用自然语言查询去搜API
 
     def _google_arxiv_search(
         self,
@@ -119,7 +117,7 @@ class MultiSearchAgent:
             ) as executor:
                 future_to_query = {
                     executor.submit(
-                        google_search_arxiv_id, query, API_TRY_COUNT, 15, end_date
+                        google_search_arxiv_id, query, API_TRY_COUNT, 50, end_date
                     ): query
                     for query in queries
                 }
@@ -133,7 +131,7 @@ class MultiSearchAgent:
                         )
                         results[query] = []
 
-            logger.info(f"google_search_arxiv_id results: {results}")
+            logger.debug(f"google_search_arxiv_id results: {results}")
 
             # Step 2: 去重 arxiv_ids
             unique_arxiv: Set[str] = set()
@@ -195,7 +193,7 @@ class MultiSearchAgent:
         """Execute OpenAlex search."""
         logger.info(f"Searching OpenAlex for '{keyword}'")
         try:
-            papers = search_paper_via_query_from_openalex(keyword, per_page=30)  #wsl-77
+            papers = search_paper_via_query_from_openalex(keyword, per_page=20)
             logger.info(f"Found {len(papers)} papers for '{keyword}' from OpenAlex")
             return SearchResult(
                 source="openalex", papers=papers, keyword=keyword, raw_query=raw_query
@@ -275,7 +273,7 @@ class MultiSearchAgent:
             logger.info(f"[{source}]: Merging results for raw_query: {raw_query}")
             for result in group:
                 if not result.papers:
-                    logger.info(f"No papers found in this result: {result}, skipping")
+                    logger.debug(f"No papers found in this result: {result}, skipping")
                     continue
 
                 if raw_query not in merged_query2paper:
@@ -305,7 +303,7 @@ class MultiSearchAgent:
 
         for result in results:
             if not result.papers:
-                logger.info(f"No papers found in this result: {result}, skipping")
+                logger.debug(f"No papers found in this result: {result}, skipping")
                 continue
             keyword = result.keyword
             raw_query = result.raw_query
@@ -401,92 +399,37 @@ class MultiSearchAgent:
                         else:
                             source_keywords = self.extract_keywords(query, source)
                         if source_keywords:
-                            # 去重（已存在的跳过）
                             source_keywords_valid = []
                             for one in source_keywords:
                                 if one not in source_keywords_already:
                                     source_keywords_already.append(one)
                                     source_keywords_valid.append(one)
                                 else:
-                                    logger.info(f"Keyword '{one}' already exists in source keywords for {source}")
+                                    logger.info(
+                                        f"Keyword '{one}' already exists in source keywords for {source}"
+                                    )
 
-                            # ---- 新组合逻辑：生成多个不同长度的组合（2词、3词、4词...最多5词） ----
-                            # 1. 从原始查询中提取核心词（去掉常见停用词）
-                            STOPWORDS = {
-                                "what", "is", "are", "was", "were", "the", "a", "an", "of", "for", "on", "at", "to",
-                                "in", "with", "without",
-                                "by", "and", "or", "but", "from", "up", "about", "into", "through", "during",
-                                "including", "etc",
-                                "papers", "studies", "work", "research", "contribute", "advancement", "which", "how",
-                                "why", "when", "where",
-                                "can", "could", "would", "should", "might", "may", "does", "do", "is", "are", "has",
-                                "have", "been", "being"
-                            }
-                            original_words = [w for w in query.lower().split() if w not in STOPWORDS and len(w) > 2]
-                            if not original_words:
-                                original_words = [query.strip()]
-
-                            # 2. 合并候选词（原始核心词 + 扩展词），去重，保持原始顺序（先原始词后扩展词）
-                            candidate_set = set()
-                            candidate_list_ordered = []
-                            # 先加入原始核心词（保护）
-                            for w in original_words:
-                                if w not in candidate_set:
-                                    candidate_set.add(w)
-                                    candidate_list_ordered.append(w)
-
-                            # 再加入扩展词，但检查是否与已有词有包含关系（忽略大小写）
-                            for w in source_keywords_valid:
-                                if w in candidate_set:
-                                    continue
-                                # 检查是否存在包含关系
-                                conflict = False
-                                for existing in candidate_list_ordered:
-                                    if existing.lower() in w.lower() or w.lower() in existing.lower():
-                                        conflict = True
-                                        break
-                                if not conflict:
-                                    candidate_set.add(w)
-                                    candidate_list_ordered.append(w)
-
-                            # 3. 如果没有候选词，回退到原始查询
-                            if not candidate_list_ordered:
+                            # wsl-84 关键词组合：过滤残词后生成 2词/3词组合查询（提高检索覆盖）
+                            clean_keywords = [
+                                k for k in source_keywords_valid
+                                if re.fullmatch(r"[a-z0-9-]+", k.lower())
+                            ]
+                            combined_queries = list(clean_keywords)
+                            if len(clean_keywords) >= 2:
+                                combined_queries.append(" ".join(clean_keywords[:2]))
+                            if len(clean_keywords) >= 3:
+                                combined_queries.append(" ".join(clean_keywords[:3]))
+                            if not combined_queries:
                                 combined_queries = [query]
-                            else:
-                                # 按长度降序排序（优先选择较长的具体词），用于贪心选择
-                                candidates_sorted = sorted(candidate_list_ordered, key=lambda x: len(x), reverse=True)
 
-                                # 预先准备：如果候选词少于2个，只生成一个单次查询
-                                if len(candidates_sorted) < 2:
-                                    combined_queries = [" ".join(candidates_sorted)]
-                                else:
-                                    # 按长度降序，取前 N 个最具体的词
-                                    candidates_sorted = sorted(candidate_list_ordered, key=lambda x: len(x),
-                                                               reverse=True)
-                                    combined_queries = []
-                                    # 2词
-                                    if len(candidates_sorted) >= 2:
-                                        combined_queries.append(" ".join(candidates_sorted[:2]))
-                                    # 3词
-                                    if len(candidates_sorted) >= 3:
-                                        combined_queries.append(" ".join(candidates_sorted[:3]))
-                                    # 如果没有任何组合（例如只有一个词），单独使用该词
-                                    if not combined_queries:
-                                        combined_queries = [" ".join(candidates_sorted)]
-                                    # 如果没有任何组合（例如候选词少于2个），回退到至少一个查询
-                                    if not combined_queries:
-                                        combined_queries = [" ".join(candidates_sorted[:2])] if len(
-                                            candidates_sorted) >= 2 else [" ".join(candidates_sorted)]
-
-                            # 存储为列表（每个元素是一个组合查询字符串）
                             query_keywords_by_source[source][query] = combined_queries
-                            # 为每个组合建立到原始查询的映射
+                            keywords_combine_query[source][query] = "|".join(
+                                clean_keywords
+                            )
                             for cq in combined_queries:
                                 query_keywords2raw[source][cq] = query
-                            # 保留 keywords_combine_query（原逻辑中用|连接，现保留为第一个组合或原始）
-                            keywords_combine_query[source][query] = combined_queries[0] if combined_queries else query
                             logger.info(
-                                f"Query {query_idx+1}: Got {len(source_keywords_valid)} keywords for {source}"
+                                f"Query {query_idx+1}: Got {len(clean_keywords)} keywords -> {len(combined_queries)} queries for {source}"
                             )
                         else:
                             # Fallback to default keywords if extraction fails
@@ -548,7 +491,7 @@ class MultiSearchAgent:
                     merged_results[source] = self._merge_search_results_grouped(
                         results_by_source[source], source
                     )
-        logger.info(f"merged_results: {merged_results}")
+        logger.debug(f"merged_results: {merged_results}")
 
         # Step 5: Merge results from all sources
         final_papers = {}
@@ -557,7 +500,7 @@ class MultiSearchAgent:
         query_keywords2raw = {}
         for source, result in merged_results.items():
             if not result.query2paper:
-                logger.info(f"result is empty, skip: {result}")
+                logger.debug(f"result is empty, skip: {result}")
                 continue
             if source == "arxiv" and result.query2paper:
                 # For Google/ArXiv results which already track query->paper relationships
@@ -579,7 +522,7 @@ class MultiSearchAgent:
 
             else:
                 for query, papers in result.query2paper.items():
-                    logger.info(f"papers: {len(papers)}: {papers[0]}")
+                    logger.debug(f"papers: {len(papers)}: {papers[0]}")
 
                     query_extracted_keywords = result.extra.get(
                         "merged_query_to_keywords", {}
@@ -639,12 +582,12 @@ def _generate_query_from_reference(
         doc_field=one_doc.get("fieldsOfStudy", ""),
     )
 
-    logger.info(f"_generate_query_from_reference model info: {model_inp}")
+    logger.debug(f"_generate_query_from_reference model info: {model_inp}")
 
     for _ in range(LLM_TRY_COUNT):
         try:
             response = get_from_llm(model_inp, model_name=LLM_MODEL_NAME)
-            logger.info(f"response: {response}")
+            logger.debug(f"response: {response}")
             response = fetch_string(response)
             query_list = extract_json(response)
             if query_list is None:
@@ -716,107 +659,7 @@ def similarity_code_v4(query, doc, search_time):
     except:
         logger.error(f"similarity_code_v4 error {traceback.format_exc()}")
         return {}
-def llm_is_relevant(query: str, doc: Dict) -> tuple[bool, float]:
-    """
-    使用 LLM 判断论文是否直接回答查询，返回 (是否相关, 置信度得分0-1)
-    """
-    prompt = f"""你是一位严格的学术评审专家。请判断以下论文是否**直接回答了**用户的问题。
 
-用户问题：{query}
-
-论文标题：{doc.get('title', '')}
-论文摘要：{doc.get('abstract', '')}
-
-请只输出一个 JSON 对象，格式为：{{"relevant": true/false, "confidence": 0.0-1.0}}
-其中 confidence 表示你有多确定（0.8以上表示非常确定）。
-"""
-    for _ in range(2):  # 重试2次
-        try:
-            response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
-            response = fetch_string(response)
-            result = extract_json(response)
-            if result and "relevant" in result:
-                return result["relevant"], result.get("confidence", 0.5)
-        except:
-            continue
-    return False, 0.0  # 默认不相关
-def llm_relevance_score(query: str, doc: Dict) -> float:
-    prompt = f"""你是一位严格的学术评审专家。请评估以下论文与用户查询的相关性，给出 0-1 之间的分数（精确到两位小数）。
-
-用户查询：{query}
-
-论文信息：
-- 标题：{doc.get('title', '')}
-- 摘要：{doc.get('abstract', '')}
-- 出版年份：{doc.get('publicationYear', '未知')}
-- 引用数：{doc.get('citationCount', 0)}
-
-**评分核心依据**：
-- 标题是否直接包含查询中的关键词或核心概念（权重最高）。
-- 摘要是否明确回答了查询所提的问题或涉及相关研究方法/应用。
-- 如果标题或摘要与查询无关，即使年份新、引用高，也应评为低分（<0.5）。
-- 年份和引用数仅作为辅助参考，不能单独提升评分。
-
-评分区间：
-- 0.90-1.00：标题和摘要都高度相关，直接解答查询。
-- 0.70-0.89：标题或摘要相关，但略有偏差或深度不足。
-- 0.50-0.69：部分相关，但主题偏离或只涉及边缘内容。
-- 0.00-0.49：标题和摘要均与查询无关。
-
-**请仅输出一个数字分数（如 0.85），不要附带任何文字解释。**
-"""
-    for attempt in range(LLM_TRY_COUNT):
-        try:
-            response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
-            # 提取分数（支持多种格式）
-            match = re.search(r'(\d+\.\d+|\d+)', response.strip())
-            if match:
-                score = float(match.group(1))
-                # 确保在 0-1 范围内
-                return max(0.0, min(1.0, score))
-            else:
-                logger.warning(f"LLM returned no numeric score: {response}")
-        except Exception as e:
-            logger.error(f"LLM relevance scoring failed: {e}")
-            time.sleep(SLEEP_TIME_LLM)
-    # 如果多次失败，返回原始 sim_score（fallback）
-    return doc.get('sim_score', 0.0)
-def llm_is_relevant_strict(query: str, doc: Dict) -> tuple[bool, float]:
-    """
-    使用 LLM 严格判断论文是否直接回答用户的原始问题。
-    返回 (是否相关, 置信度分数 0-1)。
-    置信度 >= 0.7 才视为相关。
-    """
-    prompt = f"""你是一位严格的学术评审专家。你的任务是判断以下论文是否**直接回答了**用户提出的原始问题。
-
-用户原始问题：{query}
-
-论文标题：{doc.get('title', '')}
-论文摘要：{doc.get('abstract', '')}
-
-请根据论文的标题和摘要内容，判断这篇论文是否直接针对用户问题提供了答案、解决方案、证据或深入分析。
-
-**判断标准**：
-- 如果论文的核心内容与问题直接相关，且明显是在解决该问题，则判定为“相关”。
-- 如果论文仅泛泛提及相关领域，或只涉及问题的某个边缘方面，则判定为“不相关”。
-- 只有明确、直接的回应才算相关。
-
-请只输出一个 JSON 对象，格式为：
-{{"relevant": true/false, "confidence": 0.0-1.0}}
-其中 confidence 表示你对判断的把握程度（0.8 以上表示非常确定）。
-"""
-    for _ in range(2):
-        try:
-            response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
-            response = fetch_string(response)
-            result = extract_json(response)
-            if result and "relevant" in result:
-                return result["relevant"], result.get("confidence", 0.5)
-        except Exception as e:
-            logger.warning(f"LLM strict validation failed: {e}")
-            continue
-    return False, 0.0  # 默认不相关
-'''
 def llm_relevance_score(query: str, doc: Dict) -> float:  #wsl-73 二次筛选
     """
     使用 LLM 对单篇论文进行相关性评分，返回 0-1 之间的分数。
@@ -859,7 +702,6 @@ def llm_relevance_score(query: str, doc: Dict) -> float:  #wsl-73 二次筛选
             time.sleep(SLEEP_TIME_LLM)
     # 如果多次失败，返回原始 sim_score（fallback）
     return doc.get('sim_score', 0.0)
-'''
 
 def batch_llm_relevance_filter(query: str, docs: list, top_n: int = 25, batch_size: int = 12) -> list:
     """
@@ -997,23 +839,6 @@ class AcademicTreeSearchEngine:
         self._selector = None  # 用于存储懒加载的实例
         self.max_docs = max_docs  # 用于控制返回数量
 
-    #wsl-8.12 使用 BAAI/bge-reranker-v2-m3 进行重排序
-    @property
-    def reranker_model(self):
-        if not hasattr(self, '_reranker'):
-            self._reranker = FlagReranker('BAAI/bge-reranker-v2-m3', use_fp16=True)
-        return self._reranker
-
-    def rerank_with_cross_encoder(self, query, docs, top_k=100):
-        """使用交叉编码器重排序"""
-        if not docs:
-            return []
-        pairs = [[query, doc.get('title', '') + ' ' + doc.get('abstract', '')] for doc in docs]
-        scores = self.reranker_model.compute_score(pairs, normalize=True)
-        for doc, score in zip(docs, scores):
-            doc['rerank_score'] = score
-        docs.sort(key=lambda x: x.get('rerank_score', 0), reverse=True)
-        return docs[:top_k]
     @property
     def emd_model(self):
         if self._emd_model is None:
@@ -1044,7 +869,7 @@ class AcademicTreeSearchEngine:
                                         4096,
                                         model_name=LLM_MODEL_NAME)
                 response = fetch_string(response)
-                logger.info(f"query correct response: {response}")
+                logger.debug(f"query correct response: {response}")
                 response_new = extract_json(response)
                 if response_new is None:
                     logger.warning("Failed to parse JSON, using defaults")
@@ -1438,19 +1263,7 @@ class AcademicTreeSearchEngine:
             current_year = datetime.now().year
             previous_year = current_year - 1
 
-            # wsl-8.5------ 使用意图增强的扩展模板 -----
-            logger.info(f"Using intent-aware query expansion for: {query}")
-            # 构建包含意图和领域的提示
-            intent_aware_prompt = f"""
-            You are an expert in academic search. The user's query is: "{query}".
-            The identified research intent is: "{intent}".
-            The domain is: "{domain}".
-            Generate exactly 3 concise search queries (3-8 words each) that are directly relevant to this intent and domain.
-            Avoid broad or generic terms. Output as a JSON list.
-            """
-            prompt = intent_aware_prompt
-            prompt_type = "intent_aware"
-            '''
+            # wsl-76 根据查询分析选择合适的模板
             # Determine the appropriate template based on query analysis
             if FUSION_TEMPLATE == "AUTOMATIC" and  self._is_survey_focused(intent):
                 # For survey-focused queries, prioritize finding comprehensive reviews
@@ -1501,12 +1314,12 @@ class AcademicTreeSearchEngine:
             best_response = None
             best_query_count = 0
 
-            logger.info(f"Expand query prompt for LLM: {prompt}")
+            logger.debug(f"Expand query prompt for LLM: {prompt}")
             for attempt in range(LLM_TRY_COUNT):
                 try:
                     response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
                     response = fetch_string(response)
-                    logger.info(f"Expanded queries response: {response}")
+                    logger.debug(f"Expanded queries response: {response}")
 
                     # Parse the response based on its format
                     try:
@@ -1554,7 +1367,7 @@ class AcademicTreeSearchEngine:
                     expanded_queries = self._extract_queries_from_response(
                         parsed_response, prompt_type
                     )
-                    logger.info(f"Extracted queries: {expanded_queries}")
+                    logger.debug(f"Extracted queries: {expanded_queries}")
 
                     if expanded_queries:
                         #wsl-78 ----- 新增：强制添加精确短语查询 -----
@@ -1589,14 +1402,6 @@ class AcademicTreeSearchEngine:
                 logger.info(
                     f"Using best response from {LLM_TRY_COUNT} attempts: {len(best_response)} queries"
                 )
-                # 生成变体查询并合并
-                variant_queries = self._generate_variant_queries(query, num_variants=3)
-                for v in variant_queries:
-                    if v not in best_response:
-                        best_response.append(v)
-                logger.info(
-                    f"Using best response with variants: {len(best_response)} queries"
-                )
                 return best_response
 
             # Fallback to basic expansion if all attempts fail
@@ -1609,11 +1414,6 @@ class AcademicTreeSearchEngine:
             if phrase_query not in fallback_queries:
                 fallback_queries.append(phrase_query)
                 logger.info(f"Added forced phrase query to fallback: {phrase_query}")
-            # 生成变体查询并合并
-            variant_queries = self._generate_variant_queries(query, num_variants=3)
-            for v in variant_queries:
-                if v not in fallback_queries:
-                    fallback_queries.append(v)
             return fallback_queries
 
         except Exception as e:
@@ -1686,27 +1486,7 @@ class AcademicTreeSearchEngine:
             f"recent advances in {query}",
             f"{domain} {query} methodologies",
         ]
-    #wsl-8.5
-    def _generate_variant_queries(self, query: str, num_variants: int = 2) -> List[str]:
-        """使用 LLM 生成查询的多个变体，用于增加召回"""
-        try:
-            from instruction import template_query_variants
-            prompt = template_query_variants.format(
-                user_query=query,
-                num_variants=num_variants
-            )
-            response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
-            response = fetch_string(response)
-            variants = extract_json(response)
-            if isinstance(variants, list):
-                # 过滤空字符串，并确保每个变体不为空
-                return [v.strip() for v in variants if v and v.strip()]
-            else:
-                logger.warning(f"Variant generation returned non-list: {variants}")
-                return []
-        except Exception as e:
-            logger.warning(f"Variant generation failed: {e}")
-            return []
+
     def _generate_emergency_fallback_queries(self, query):
         """
         Generate emergency fallback queries when all else fails.
@@ -1941,6 +1721,53 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
 
         return output, id2docs, query_source_map, query_keywords2raw
 
+    def search_papers(self, queries, end_date="", searched_docs=dict()):
+        results = {}
+        if end_date == "":
+            end_date = self.current_date
+
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=API_PARALLEL_REQUEST #wsl
+        ) as executor:
+            future_to_query = {
+                executor.submit(
+                    google_search_arxiv_id, query, API_TRY_COUNT, 10, end_date
+                ): query
+                for query in queries
+            }
+            for future in concurrent.futures.as_completed(future_to_query):
+                query = future_to_query[future]
+                try:
+                    results[query] = future.result()
+                except Exception as e:
+                    logger.error(f"Search failed for query {query}: {str(e)}")
+                    results[query] = []
+
+        logger.debug(f"google_search_arxiv_id: {results}")
+
+        unique_arxiv = set()
+        original_arxiv = []
+        for arxiv_ids in results.values():
+            original_arxiv.extend(arxiv_ids)
+            for arxiv_id in arxiv_ids:
+                if arxiv_id not in searched_docs:
+                    unique_arxiv.add(arxiv_id)
+
+        logger.info(
+            f"original num is: {len(original_arxiv)}, unique num is: {len(list(unique_arxiv))}"
+        )
+
+        id2docs = parallel_search_search_paper_from_arxiv(
+            list(unique_arxiv), max_workers=API_PARALLEL_REQUEST, batch_size=8
+        )
+
+        output = {}
+        for query, arxiv_ids in results.items():
+            output[query] = [
+                id2docs[arxiv_id] for arxiv_id in arxiv_ids if arxiv_id in id2docs
+            ]
+        return output, id2docs
+
     def calculate_sim_bge(
         self, query, docs, search_time="", score_thresh=BEGIN_SIM_THRESHOLD, source=""
     ):
@@ -1958,12 +1785,9 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
         ]
         '''
         golden_paper_info = [
-            "Title: {}\nTitle: {}\nTitle: {}\nAbstract: {}".format(
+            "Title:{}\nAbstract:{}".format(
                 doc.get("title", ""),
-                doc.get("title", ""),
-                doc.get("title", ""),
-                doc.get("abstract", "")
-                # 不再包含作者、年份、领域，以免干扰
+                doc.get("abstract", ""),
             )
             for doc in docs
         ]
@@ -2019,13 +1843,10 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
         docs = [doc for doc in docs if doc.get("title", "") and doc.get("abstract", "")]
 
         golden_paper_info = [
-            "Title: {}\nTitle: {}\nAbstract: {}\nAuthors: {}\nYear: {}\nFields: {}".format(
-                doc.get("title", ""),
-                doc.get("title", ""),  # 重复标题
-                doc.get("abstract", ""),
-                "; ".join([a.get("name", "") for a in doc.get("authors", [])]),
-                doc.get("publicationYear", ""),
-                doc.get("fieldsOfStudy", "")
+            prompt_template.format(
+                title=paper.get("title", ""),
+                abstract=paper.get("abstract", ""),
+                user_query=query,
             )
             for paper in docs
         ]
@@ -2176,45 +1997,50 @@ Respond with only "Yes" if the intent is primarily seeking survey/review papers,
     '''def calculate_similarity(
         self, query, docs, search_time="", score_thresh=0.5, source=""
     ):
-        logger.debug(f"calculate_similarity, query: {query}; doc is: {docs[0].keys()}")
-        relevace_docs = []
-        irrelevace_docs = []
-        with concurrent.futures.ThreadPoolExecutor(
-            max_workers=LLM_PARREL_NUM
-        ) as executor:
-            future_to_doc = {
-                executor.submit(
-                    _calculate_similarity_with_retry, query, search_time, doc
-                ): doc
-                for doc in docs
-            }
-            for future in concurrent.futures.as_completed(future_to_doc):
-                doc = future_to_doc[future]
-                res = future.result(timeout=2)
-                try:
-                    if res:
-                        doc.update(res)
-                    else:
-                        print(traceback.format_exc())
-                        doc["sim_score"] = -1  # 失败则设为0，这个数据就不要了
-                        doc["sim_info_details"] = {}
-                except:
-                    print(traceback.format_exc())
-                    doc["sim_score"] = -1  # 失败则设为0，这个数据就不要了
-                    doc["sim_info_details"] = {}
-                finally:
-                    simple_info = {
-                        "arxivId": doc["arxivId"],
-                        "paper_id": doc.get("paper_id", doc.get("arxivId")),
-                        "sim_score": doc["sim_score"],
-                        "sim_info_details": doc["sim_info_details"],
-                        "source": source,
-                    }
-                    if doc["sim_score"] >= score_thresh:
-                        relevace_docs.append(simple_info)
-                    else:
-                        irrelevace_docs.append(simple_info)
+        """
+        纯 BGE-M3 embedding 评分（无 LLM）：
+        余弦相似度直接作为 sim_score，>= score_thresh 为相关。
+        """
+        if not docs:
+            return [], []
 
+        doc_texts = [
+            f"Title: {d.get('title', '')}\nAbstract: {d.get('abstract', '')}"
+            for d in docs
+        ]
+
+        start = time.time()
+        q_emb = self._get_bge_embeddings([query])
+        d_embs = self._get_bge_embeddings(doc_texts) if doc_texts else None
+
+        if not q_emb or not d_embs:
+            logger.error("BGE embedding failed, all docs treated as irrelevant")
+            irrelevace_docs = [{
+                "arxivId": d["arxivId"],
+                "paper_id": d.get("paper_id", d.get("arxivId")),
+                "sim_score": 0.0, "source": source,
+                "sim_info_details": {"reason": "BGE embedding failed"},
+            } for d in docs]
+            return [], irrelevace_docs
+
+        qv = q_emb[0]
+        relevace_docs, irrelevace_docs = [], []
+
+        for d, de in zip(docs, d_embs):
+            sim = self._cosine_similarity(qv, de)
+            info = {
+                "arxivId": d["arxivId"],
+                "paper_id": d.get("paper_id", d.get("arxivId")),
+                "sim_score": sim,
+                "source": source,
+                "sim_info_details": {"bge_score": sim, "method": "BGE-M3 cosine"},
+            }
+            (relevace_docs if sim >= score_thresh else irrelevace_docs).append(info)
+
+        logger.info(
+            f"BGE pure scoring: {len(docs)} docs -> {len(relevace_docs)} relevant "
+            f"(threshold={score_thresh}), {time.time()-start:.1f}s"
+        )
         return relevace_docs, irrelevace_docs
         '''
 
