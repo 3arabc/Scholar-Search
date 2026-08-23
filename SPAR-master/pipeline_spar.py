@@ -1037,8 +1037,17 @@ class AcademicSearchTree:
                     )
                     if reranked_list:
                         # 截断到 self.max_docs（保持排序顺序）
-                        reranked_list = reranked_list[:self.max_docs]
+                        reranked_list = reranked_list[50]
                         # 构建有序字典（Python 3.7+ 保留插入顺序）
+                        from search_engine import llm_relevance_score
+                        for doc in reranked_list:
+                            llm_score = llm_relevance_score(self.user_query, doc)
+                            doc['llm_score'] = llm_score
+                            doc['final_score'] = 0.4 * llm_score + 0.6 * doc.get('sim_score', 0)
+                            doc['final_score'] = min(1.0, doc['final_score'])
+
+                        reranked_list.sort(key=lambda x: x.get('final_score', 0), reverse=True)
+                        reranked_list = reranked_list[:MAX_DOCS]
                         new_searched = {}
                         for doc in reranked_list:
                             doc_id = doc.get("paper_id", "")
@@ -1082,7 +1091,38 @@ class AcademicSearchTree:
                             kept += 1
                     self.root.searched_docs = filtered
                     logger.info(f"Final filter: kept {kept} docs (threshold={SIM_THRESHOLD}, max={self.max_docs})")
+            # ===== 最终严格验证：只保留直接相关的论文 =====
+            if self.root.reranked_top_docs:
+                TOP_K = 20  # 只验证前 30 篇（可调）
+                docs_to_validate = self.root.reranked_top_docs[:TOP_K]
+                validated_docs = []
+                for doc in docs_to_validate:
+                    is_rel, conf = llm_is_relevant_strict(self.user_query, doc)
+                    doc['llm_strict_relevant'] = is_rel
+                    doc['llm_strict_confidence'] = conf
+                    if is_rel and conf >= 0.7:  # 置信度阈值
+                        validated_docs.append(doc)
+                    else:
+                        logger.debug(
+                            f"Strict validation removed: {doc.get('title', '')[:50]}... (conf={conf:.2f})")
 
+                if validated_docs:
+                    # 用验证通过的文档替换原有列表（保留顺序）
+                    self.root.reranked_top_docs = validated_docs
+                    # 重建 searched_docs
+                    new_searched = {}
+                    for doc in validated_docs:
+                        doc_id = doc.get("paper_id", "")
+                        if doc_id:
+                            new_searched[doc_id] = doc
+                    self.root.searched_docs = new_searched
+                    logger.info(f"Strict validation kept {len(validated_docs)}/{len(docs_to_validate)} docs.")
+                else:
+                    # 如果全部被剔除，回退到未验证的列表（可选）
+                    logger.warning("All docs rejected by strict validation, keeping original list.")
+                    # 保留原始列表（不做剔除），或者降低阈值重新验证
+                    # 这里保留原始列表，但可以根据需求改为空列表或降低阈值
+                    pass
             # 最后返回结果（需修改 _collect_results 避免打乱顺序）
             return self._collect_results()
 
