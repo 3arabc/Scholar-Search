@@ -20,7 +20,7 @@ class SearchConfig:
 
     max_depth: int = 1
     max_docs: int = 50
-    similarity_threshold: float = 0.6
+    similarity_threshold: float = 0.5
     high_score_threshold: float = 0.75
     query_batch_size: int = 4
     reference_batch_size: int = 4
