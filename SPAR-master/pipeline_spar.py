@@ -1,10 +1,3 @@
-# !/usr/bin/env python
-# -*- coding:utf-8 -*-
-# ==================================================================
-# [Author]       : shixiaofeng
-# [Descriptions] :
-# ==================================================================
-
 from collections import deque
 from datetime import datetime, timedelta
 from global_config import *
@@ -51,7 +44,7 @@ class AcademicSearchTree:
         self,
         max_depth: int = 1,
         max_docs: int = 200,
-        similarity_threshold: float = 0.6,
+        similarity_threshold: float = 0.5,
         search_engine=None,
         enable_llm_rerank=True,  # wsl-73 二次筛选
         llm_threshold=0.7,
@@ -1006,11 +999,18 @@ class AcademicSearchTree:
                 f"Found {high_rel_count} highly relevant documents (score > {self.high_score_thresh})"
             )
 
+
+            # wsl-710 ===== 新增：应用硬性过滤条件 =====
+            if self.root.searched_docs:
+                self.root.searched_docs = self._filter_docs(
+                    self.root.searched_docs,
+                    filter_config=self.filter_config
+                )
             # wsl-84 批量 LLM 精筛（替代旧版逐篇打分）
             if ENABLE_LLM_RERANK:
                 logger.info("Applying batch LLM fine-grained filtering...")
                 all_docs = list(self.root.searched_docs.values())
-                kept_docs = batch_llm_relevance_filter(self.user_query, all_docs, top_n=25)
+                kept_docs = batch_llm_relevance_filter(self.user_query, all_docs, top_n=50)
                 kept_ids = {d.get("paper_id") for d in kept_docs if d.get("paper_id")}
                 self.root.searched_docs = {
                     pid: doc for pid, doc in self.root.searched_docs.items()
@@ -1018,12 +1018,6 @@ class AcademicSearchTree:
                 }
                 logger.info(f"[LLM精筛] searched_docs: {len(all_docs)} -> {len(self.root.searched_docs)}")
                 logger.info(f"After LLM filter: {len(filtered_docs)} documents kept")
-            # wsl-710 ===== 新增：应用硬性过滤条件 =====
-            if self.root.searched_docs:
-                self.root.searched_docs = self._filter_docs(
-                    self.root.searched_docs,
-                    filter_config=self.filter_config
-                )
             #if self.root.searched_docs:
             #    self.root.searched_docs = self._filter_docs(self.root.searched_docs)
             #    logger.info(f"After filter: {len(self.root.searched_docs)} documents remain")
@@ -1037,8 +1031,16 @@ class AcademicSearchTree:
                     )
                     if reranked_list:
                         # 截断到 self.max_docs（保持排序顺序）
-                        reranked_list = reranked_list[:self.max_docs]
+                        reranked_list = reranked_list[:75]
                         # 构建有序字典（Python 3.7+ 保留插入顺序）
+                        for doc in reranked_list:
+                            llm_score = llm_relevance_score(self.user_query, doc)
+                            doc['llm_score'] = llm_score
+                            doc['final_score'] = 0.3 * llm_score + 0.7 * doc.get('sim_score', 0)
+                            doc['final_score'] = min(1.0, doc['final_score'])
+
+                        reranked_list.sort(key=lambda x: x.get('final_score', 0), reverse=True)
+                        reranked_list = reranked_list[:50]
                         new_searched = {}
                         for doc in reranked_list:
                             doc_id = doc.get("paper_id", "")
@@ -1082,7 +1084,6 @@ class AcademicSearchTree:
                             kept += 1
                     self.root.searched_docs = filtered
                     logger.info(f"Final filter: kept {kept} docs (threshold={SIM_THRESHOLD}, max={self.max_docs})")
-
             # 最后返回结果（需修改 _collect_results 避免打乱顺序）
             return self._collect_results()
 

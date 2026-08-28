@@ -34,7 +34,7 @@ class ModelConfig:
 
     url: str
     max_len: int
-    temperature: float = 0.8
+    temperature: float = 0.1
     model_name: str = ""
     top_p: float = 0.9
     top_k: int = 20
@@ -123,7 +123,7 @@ MODEL_CONFIGS = {
         max_len=131072,
         model_name="deepseek-v4-flash",
         think_bool=False,
-        temperature=0.7,
+        temperature=0.1,
         top_p=0.8,
         top_k=20,
         min_p=0,
@@ -141,7 +141,7 @@ MODEL_CONFIGS = {
         max_len=131072,
         model_name="deepseek-ai/DeepSeek-V3.2",
         think_bool=False,
-        temperature=0.7,
+        temperature=0.1,
         top_p=0.8,
         top_k=20,
         min_p=0,
@@ -212,7 +212,7 @@ class LLMClient:
             chat_response = openai_client.chat.completions.create(
                 model=MODEL_CONFIGS[data["model"]].model_name,
                 messages=data["messages"],
-                temperature=data.get("temperature", 0.7),
+                temperature=data.get("temperature", 0.8),
                 top_p=data.get("top_p", 0.8),
                 presence_penalty=1.5,
                 extra_body={

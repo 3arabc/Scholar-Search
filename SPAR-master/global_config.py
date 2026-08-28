@@ -12,7 +12,8 @@ from typing import Dict, List, Any
 # Debug mode
 DEBUG = False
 
-#set SILICONFLOW_API_KEY=sk-uejssktdixvxpaorxeonyztxomulwlnxkqmnisonsiffepsn
+#set DEEPSEEK_API_KEY=sk-c049a5216e1244409378514aa687f95d
+#set SILICONFLOW_API_KEY=sk-pjizzeaxvfoqofwrvedkytrrearnoyifexctvmeyhkqxzuih
 #set GOOGLE_SERPER_KEY=28cca99adde1d0a52ecd6b3b481b37f093d499e3
 #set OPENALEX_API_KEY=HVx0tDeogC37dQ10aIPTm5
 #python demo_app_with_front.py
@@ -112,15 +113,15 @@ RERANK = True #wsl-73
 KEY_WORDS_NUM =2
 LLM_PARREL_NUM=4  #wsl-74并发
 #wsl-710
-SIM_THRESHOLD = 0.3
-MAX_DOCS = 200               # 原来可能10，增大到200
+SIM_THRESHOLD = 0.6
+MAX_DOCS = 100               # 原来可能10，增大到200
 # 重排序条件
-RERANK_SORT_BY = 'year'   # 默认按年份排序
+RERANK_SORT_BY = 'similarity'   # 默认按年份排序
 # 过滤配置
-FILTER_YEAR_START = 2020
-FILTER_YEAR_END = 2025
-FILTER_MIN_CITATIONS = 10
-FILTER_FIELDS = ["Computer Science"]  # 支持多个
+FILTER_YEAR_START = None
+FILTER_YEAR_END = None
+FILTER_MIN_CITATIONS = None
+FILTER_FIELDS = []  # 支持多个
 # 是否启用领域过滤（如果 FILTER_FIELDS 为空，即使启用也无效）
 FILTER_ENABLE_FIELDS = True
 

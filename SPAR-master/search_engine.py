@@ -94,7 +94,7 @@ class MultiSearchAgent:
                     return [kw.strip() for kw in keywords.split(",") if kw.strip()][:limit]
             except:
                 logger.error(f"Failed to extract keywords: {traceback.format_exc()}")
-        return []  # 提取失败返回空，避免用自然语言查询去搜API
+        return [query]  # 提取失败返回空，避免用自然语言查询去搜API
 
     def _google_arxiv_search(
         self,
@@ -659,7 +659,7 @@ def similarity_code_v4(query, doc, search_time):
     except:
         logger.error(f"similarity_code_v4 error {traceback.format_exc()}")
         return {}
-
+'''
 def llm_relevance_score(query: str, doc: Dict) -> float:  #wsl-73 二次筛选
     """
     使用 LLM 对单篇论文进行相关性评分，返回 0-1 之间的分数。
@@ -702,7 +702,50 @@ def llm_relevance_score(query: str, doc: Dict) -> float:  #wsl-73 二次筛选
             time.sleep(SLEEP_TIME_LLM)
     # 如果多次失败，返回原始 sim_score（fallback）
     return doc.get('sim_score', 0.0)
+'''
+def llm_relevance_score(query: str, doc: Dict) -> float:
+    if not doc.get('title') or not doc.get('abstract'):
+        return 0.0
+    prompt = f"""你是一位严格的学术评审专家。请评估以下论文与用户查询的相关性，给出 0-1 之间的分数（精确到两位小数）。
 
+用户查询：{query}
+
+论文信息：
+- 标题：{doc.get('title', '')}
+- 摘要：{doc.get('abstract', '')}
+- 出版年份：{doc.get('publicationYear', '未知')}
+- 引用数：{doc.get('citationCount', 0)}
+
+**评分核心依据**：
+- 标题是否直接包含查询中的关键词或核心概念（权重最高）。
+- 摘要是否明确回答了查询所提的问题或涉及相关研究方法/应用。
+- 如果标题或摘要与查询无关，即使年份新、引用高，也应评为低分（<0.5）。
+- 年份和引用数仅作为辅助参考，不能单独提升评分。
+
+评分区间：
+- 0.90-1.00：标题和摘要都高度相关，直接解答查询。
+- 0.70-0.89：标题或摘要相关，但略有偏差或深度不足。
+- 0.50-0.69：部分相关，但主题偏离或只涉及边缘内容。
+- 0.00-0.49：标题和摘要均与查询无关。
+
+**请仅输出一个数字分数（如 0.85），不要附带任何文字解释。**
+"""
+    for attempt in range(LLM_TRY_COUNT):
+        try:
+            response = get_from_llm(prompt, model_name=LLM_MODEL_NAME)
+            # 提取分数（支持多种格式）
+            match = re.search(r'(\d+\.\d+|\d+)', response.strip())
+            if match:
+                score = float(match.group(1))
+                # 确保在 0-1 范围内
+                return max(0.0, min(1.0, score))
+            else:
+                logger.warning(f"LLM returned no numeric score: {response}")
+        except Exception as e:
+            logger.error(f"LLM relevance scoring failed: {e}")
+            time.sleep(SLEEP_TIME_LLM)
+    # 如果多次失败，返回原始 sim_score（fallback）
+    return doc.get('sim_score', 0.0)
 def batch_llm_relevance_filter(query: str, docs: list, top_n: int = 25, batch_size: int = 12) -> list:
     """
     批量 LLM 精筛（wsl-84）：对 BGE 过滤后的候选池做语义确认。
